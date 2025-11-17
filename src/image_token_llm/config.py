@@ -97,6 +97,7 @@ class DreamingConfig(BaseModel):
 
 
 class ExperimentConfig(BaseModel):
+    hf_tokenizer_name: str = "bert-base-uncased"
     image_tokenizer: ImageTokenizerConfig = Field(
         default_factory=_image_tokenizer_defaults
     )

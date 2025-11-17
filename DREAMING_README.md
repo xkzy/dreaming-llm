@@ -91,6 +91,53 @@ print(f"Dreams explored: {len(result['dreams'])} paths")
 print(f"Reasoning graph: {result['graph_data']['num_nodes']} nodes")
 ```
 
+### 🔮 Live Dream Viewing (NEW!)
+
+**Watch what the model is dreaming in real-time during generation!**
+
+```python
+# Create model with dream viewer enabled
+model = DreamingReasoningLLM(
+    device="cuda",
+    enable_dream_viewer=True  # Enable dream viewing!
+)
+
+# Watch dreams stream live during generation
+result = model.generate(
+    prompt="What happens when you drop a ball?",
+    watch_dreams=True  # Live stream to console!
+)
+
+# Export recorded dreams
+model.export_recorded_dreams("dreams.json", format="json")
+
+# Create visualization heatmap
+model.visualize_dream_evolution(save_path="dreams.png")
+
+# Get dream statistics
+viewer = model.get_dream_viewer()
+summary = viewer.get_dream_summary()
+print(f"Total dreams: {summary['total_dreams']}")
+print(f"Avg mean: {summary['avg_mean']:.4f}")
+```
+
+**Run the interactive demo:**
+```bash
+# Watch dreams live
+python scripts/demo_dream_viewer.py --watch
+
+# Export dreams to JSON
+python scripts/demo_dream_viewer.py --export dreams.json
+
+# Create heatmap visualization
+python scripts/demo_dream_viewer.py --visualize dreams.png
+
+# Use pretrained model
+python scripts/demo_dream_viewer.py \
+    --model-path ./models/distilled_large_scale \
+    --watch --visualize dreams.png
+```
+
 ### Image Input
 
 ```python

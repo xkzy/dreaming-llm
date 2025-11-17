@@ -11,6 +11,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# Optional: import transformers for loading pretrained weights
+try:
+    from transformers import AutoModel, AutoTokenizer
+except ImportError:
+    AutoModel = None
+    AutoTokenizer = None
+
 from .config import TextDecoderConfig, TokenizerConfig
 
 
@@ -170,6 +177,73 @@ class ImageAwareTextDecoder(nn.Module):
         self.decoder = nn.TransformerDecoder(decoder_layer, config.num_layers)
         self.dropout = nn.Dropout(config.dropout)
         self.lm_head = nn.Linear(embedding_dim, config.vocab_size, bias=False)
+
+    def load_pretrained_from_hf(self, hf_model_name_or_model, tokenizer=None):
+        """
+        Load embedding and output (lm_head) weights from a HuggingFace model.
+        Args:
+            hf_model_name_or_model: str or HuggingFace model instance
+                (e.g., BertModel)
+            tokenizer: Optional HuggingFace tokenizer (if not provided,
+                will be loaded)
+        """
+        if AutoModel is None:
+            raise ImportError("transformers is not installed.")
+        if isinstance(hf_model_name_or_model, str):
+            hf_model = AutoModel.from_pretrained(hf_model_name_or_model)
+            if tokenizer is None:
+                if AutoTokenizer is None:
+                    raise ImportError(
+                        "transformers.AutoTokenizer is not available."
+                    )
+                tokenizer = AutoTokenizer.from_pretrained(
+                    hf_model_name_or_model
+                )
+        else:
+            hf_model = hf_model_name_or_model
+            if tokenizer is None:
+                raise ValueError(
+                    "Tokenizer must be provided if passing a model instance."
+                )
+
+        # Map vocab
+        vocab_size = self.config.vocab_size
+        embedding_dim = self.embedding_dim
+        # HuggingFace: usually model.embeddings.word_embeddings.weight
+        hf_emb = hf_model.get_input_embeddings().weight.data
+        if hf_emb.shape[1] != embedding_dim:
+            raise ValueError(
+                f"Embedding dim mismatch: {hf_emb.shape[1]} vs {embedding_dim}"
+            )
+        # Map tokens by tokenizer vocab
+        for idx in range(vocab_size):
+            token = tokenizer.convert_ids_to_tokens(idx)
+            hf_id = tokenizer.convert_tokens_to_ids(token)
+            if 0 <= hf_id < hf_emb.shape[0]:
+                self.token_embeddings.weight.data[idx] = hf_emb[hf_id]
+            else:
+                # Random init for OOV tokens
+                nn.init.normal_(
+                    self.token_embeddings.weight.data[idx], mean=0.0, std=0.02
+                )
+
+        # Output layer: try to tie weights if possible
+        if hasattr(hf_model, 'cls') and hasattr(hf_model.cls, 'predictions'):
+            # BERT-style
+            lm_head_w = hf_model.cls.predictions.decoder.weight.data
+        elif hasattr(hf_model, 'lm_head'):
+            lm_head_w = hf_model.lm_head.weight.data
+        else:
+            lm_head_w = hf_emb  # fallback: tie to embedding
+        for idx in range(vocab_size):
+            token = tokenizer.convert_ids_to_tokens(idx)
+            hf_id = tokenizer.convert_tokens_to_ids(token)
+            if 0 <= hf_id < lm_head_w.shape[0]:
+                self.lm_head.weight.data[idx] = lm_head_w[hf_id]
+            else:
+                nn.init.normal_(
+                    self.lm_head.weight.data[idx], mean=0.0, std=0.02
+                )
 
     def forward(
         self,

@@ -1,3 +1,32 @@
+### Image Tokenizer (CLIP-based, Production Ready)
+
+The `ImageTokenizer` now uses a pretrained CLIP vision encoder by default to produce semantic tokens for each image, with support for large batches, device selection, and production scaling.
+
+- **Default:** CLIP-based semantic tokens (requires `transformers` and `torch`)
+- **Legacy:** Patch-based (deprecated)
+
+**Usage:**
+
+```python
+from image_token_llm.image_tokenizer import ImageTokenizer
+from image_token_llm.config import ImageTokenizerConfig
+import torch
+
+config = ImageTokenizerConfig(embedding_dim=512, patch_size=16)
+tokenizer = ImageTokenizer(config, device="cuda")  # Uses CLIP by default, on GPU
+images = [torch.randn(3, 224, 224) for _ in range(128)]
+tokens = tokenizer.tokenize(images, batch_size=32)  # Efficient large-batch
+print(tokens[0].shape)  # (512,)
+```
+
+If you want to use a different backbone (e.g., ResNet or lite), pass `backbone="resnet"` or `backbone="lite"` to the constructor.
+
+#### Dictionary Size and Scaling
+
+The effective "dictionary size" (vocabulary of unique image tokens) is determined by the CLIP embedding space (default: 512-dim). For larger-scale or more granular tokenization, you can:
+- Increase the embedding dimension (with a larger CLIP model)
+- Use clustering or quantization on CLIP embeddings to build a discrete codebook
+- Adjust batch size and device for high-throughput production
 # Image-Token Reasoning LLM Playground
 
 ## Vision

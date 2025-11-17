@@ -114,45 +114,63 @@ class ImageTokenizerTrainer:
         )
     
     def train_epoch(self, dataloader: DataLoader) -> float:
-        """Train for one epoch."""
+        """Train for one epoch with full triplet batching."""
         self.encoder.train()
         self.decoder.train()
-        
+
         total_loss = 0.0
         num_batches = 0
-        
+
         with tqdm(dataloader, desc="Training") as pbar:
             for batch in pbar:
                 images = batch.to(self.device)
-                
+                batch_size = images.shape[0]
+
+                # Always use full triplets: what, action, result are distinct images
+                # If batch_size is not divisible by 3, drop the remainder for this batch
+                triplet_count = batch_size // 3
+                if triplet_count == 0:
+                    # Not enough images for a triplet, skip this batch
+                    continue
+
+                # Reshape to (triplet_count, 3, C, H, W)
+                images_triplets = images[:triplet_count * 3].view(triplet_count, 3, 3, 224, 224)
+                # what, action, result: each is (triplet_count, 3, 224, 224)
+                what = images_triplets[:, 0, :, :, :]
+                action = images_triplets[:, 1, :, :, :]
+                result = images_triplets[:, 2, :, :, :]
+
                 # Encode
                 embeddings = self.encoder.encode_triplet(
-                    what=images,
-                    action=images,  # Use same image for simplicity
-                    result=images,
+                    what=what,
+                    action=action,
+                    result=result,
                 )
-                
+
                 # Decode
                 reconstructed = self.decoder(embeddings)
                 reconstructed = reconstructed.view(-1, 3, 224, 224)
-                
-                # Loss
-                loss = self.criterion(reconstructed, images)
-                
+
+                # For reconstruction loss, use the 'result' image as the target
+                loss = self.criterion(reconstructed, result)
+
                 # Backward
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
-                
+
                 # Track
                 total_loss += loss.item()
                 num_batches += 1
-                
+
                 pbar.set_postfix({"loss": loss.item()})
-        
-        avg_loss = total_loss / num_batches
+
+        if num_batches == 0:
+            avg_loss = float('nan')
+        else:
+            avg_loss = total_loss / num_batches
         self.train_losses.append(avg_loss)
-        
+
         return avg_loss
     
     def save(self, output_dir: str):

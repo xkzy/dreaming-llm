@@ -267,13 +267,41 @@ class DreamGenerator(nn.Module):
                 )
                 expert_dreams.append(expert_dream)
             
-            # Fuse expert outputs using gating weights
-            # For simplicity, use top-weighted expert
-            # (Could also blend all experts)
-            top_expert_idx = expert_weights[0].argmax().item()
-            dream_seq = expert_dreams[top_expert_idx]
-            
-            all_dreams.append(dream_seq)
+            # Fuse expert outputs using gating weights (full MoE blending)
+            # expert_dreams: List[num_experts][dream_length][(B, D), (B, D), (B, D)]
+            # expert_weights: (B, num_experts)
+            # We blend each step across experts using weights for each batch element
+            blended_dream_seq = []
+            for step in range(self.dream_length):
+                # For each expert, get (what, action, result) at this step
+                step_expert_outputs = [
+                    expert_dreams[expert_idx][step]
+                    for expert_idx in range(self.num_experts)
+                ]
+                # Each is (B, D), so stack: (num_experts, B, D)
+                what_stack = torch.stack(
+                    [out[0] for out in step_expert_outputs], dim=0
+                )  # (num_experts, B, D)
+                action_stack = torch.stack(
+                    [out[1] for out in step_expert_outputs], dim=0
+                )
+                result_stack = torch.stack(
+                    [out[2] for out in step_expert_outputs], dim=0
+                )
+                # Blend using expert_weights:
+                # (B, num_experts) -> (B, 1, num_experts)
+                weights = expert_weights.t().unsqueeze(-1)
+                # (num_experts, B, 1)
+                # Weighted sum over experts for each batch
+                # (num_experts, B, D) * (num_experts, B, 1)
+                # -> (num_experts, B, D)
+                what_blend = (what_stack * weights).sum(dim=0)  # (B, D)
+                action_blend = (action_stack * weights).sum(dim=0)
+                result_blend = (result_stack * weights).sum(dim=0)
+                blended_dream_seq.append(
+                    (what_blend, action_blend, result_blend)
+                )
+            all_dreams.append(blended_dream_seq)
         
         return all_dreams
 
@@ -288,7 +316,12 @@ class OutputDecoder(nn.Module):
     - Mixed mode: Both text and images
     """
     
-    def __init__(self, config: DreamingConfig, embedding_dim: int = 512, vocab_size: int = 4096):
+    def __init__(
+        self,
+        config: DreamingConfig,
+        embedding_dim: int = 512,
+        vocab_size: int = 4096
+    ):
         super().__init__()
         self.config = config
         self.embedding_dim = embedding_dim
@@ -307,14 +340,20 @@ class OutputDecoder(nn.Module):
             nn.Linear(embedding_dim, embedding_dim * 2),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(embedding_dim * 2, embedding_dim * 3),  # (what, action, result)
+            nn.Linear(
+                embedding_dim * 2, embedding_dim * 3
+            ),  # (what, action, result)
         )
         
     def forward(
         self,
         reasoning_embedding: torch.Tensor,
         mode: str = "text",
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+    ) -> Union[
+        torch.Tensor,
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+        dict
+    ]:
         """
         Decode reasoning into output.
         
@@ -324,7 +363,8 @@ class OutputDecoder(nn.Module):
             
         Returns:
             If mode="text": (B, vocab_size) logits
-            If mode="image": Tuple of (what, action, result), each (B, embedding_dim)
+            If mode="image":
+                Tuple of (what, action, result), each (B, embedding_dim)
             If mode="both": Dict with both outputs
         """
         if mode == "text":
@@ -353,7 +393,9 @@ class OutputDecoder(nn.Module):
             }
         
         else:
-            raise ValueError(f"Invalid mode: {mode}. Use 'text', 'image', or 'both'")
+            raise ValueError(
+                f"Invalid mode: {mode}. Use 'text', 'image', or 'both'"
+            )
     
     def generate_sequence(
         self,

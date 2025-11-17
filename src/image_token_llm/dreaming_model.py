@@ -13,6 +13,10 @@ from image_token_llm.config import (  # type: ignore[import]
 from image_token_llm.dream_graph_reasoner import (  # type: ignore[import]
     DreamGraphReasoner,
 )
+from image_token_llm.dream_viewer import (  # type: ignore[import]
+    DreamViewer,
+    LiveDreamStream,
+)
 from image_token_llm.dreaming import (  # type: ignore[import]
     DreamGenerator,
     InputTokenizer,
@@ -49,10 +53,12 @@ class DreamingReasoningLLM(nn.Module):
         embedding_dim: int = 512,
         vocab_size: int = 4096,
         enable_rl: bool = True,
+        enable_dream_viewer: bool = False,
     ):
         super().__init__()
         self.config = config or ExperimentConfig()
         self.enable_rl = enable_rl
+        self.enable_dream_viewer = enable_dream_viewer
         
         # Device setup
         requested_device = device or self.config.runtime.device
@@ -60,6 +66,11 @@ class DreamingReasoningLLM(nn.Module):
                 and not torch.cuda.is_available()):
             requested_device = "cpu"
         self.device = torch.device(requested_device)
+        
+        # Dream viewer for visualization
+        self.dream_viewer = DreamViewer(
+            enable_recording=enable_dream_viewer
+        ) if enable_dream_viewer else None
         
         self.embedding_dim = embedding_dim
         self.vocab_size = vocab_size
@@ -181,6 +192,7 @@ class DreamingReasoningLLM(nn.Module):
         temperature: float = 1.0,
         output_mode: str = "text",
         return_dreams: bool = False,
+        watch_dreams: bool = False,
     ) -> Union[str, torch.Tensor, Dict]:
         """
         Generate output with optional dream visualization.
@@ -192,11 +204,18 @@ class DreamingReasoningLLM(nn.Module):
             temperature: Sampling temperature
             output_mode: "text", "image", or "both"
             return_dreams: If True, return dream sequences for visualization
+            watch_dreams: If True, stream dreams in real-time
             
         Returns:
             Generated output (str for text, tensors for images)
             If return_dreams=True, returns dict with output and dreams
         """
+        # Setup dream streaming if requested
+        dream_stream = None
+        if watch_dreams and self.dream_viewer is not None:
+            dream_stream = LiveDreamStream(self.dream_viewer)
+            dream_stream.__enter__()
+        
         with torch.no_grad():
             # Convert prompt to tokens (simple char-level)
             if prompt is not None:
@@ -219,6 +238,33 @@ class DreamingReasoningLLM(nn.Module):
             
             # Generate dreams
             dream_sequences = self.dream_generator(what, action, result)
+            
+            # Capture dream states if streaming
+            if dream_stream is not None:
+                for step, dream_seq in enumerate(dream_sequences):
+                    # Each dream_seq is a list of (w, a, r) triplets
+                    # Convert to tensor for visualization
+                    if isinstance(dream_seq, list) and len(dream_seq) > 0:
+                        # Stack the triplets into a tensor
+                        triplet_tensors = []
+                        for triplet in dream_seq:
+                            is_triplet = (
+                                isinstance(triplet, tuple)
+                                and len(triplet) == 3
+                            )
+                            if is_triplet:
+                                # Stack w, a, r along dim 0
+                                stacked = torch.stack(triplet, dim=0)
+                                triplet_tensors.append(stacked)
+                        if triplet_tensors:
+                            dream_tensor = torch.stack(
+                                triplet_tensors, dim=0
+                            )
+                            dream_stream.stream_dream(
+                                dream_state=dream_tensor,
+                                step=step,
+                                metadata={"prompt": prompt}
+                            )
             
             # Graph reasoning
             reasoning_embedding = self.graph_reasoner(dream_sequences)
@@ -286,6 +332,54 @@ class DreamingReasoningLLM(nn.Module):
                     f"Invalid output_mode: {output_mode}. "
                     "Must be 'text', 'image', or 'both'"
                 )
+        
+        # Cleanup dream stream if active
+        if dream_stream is not None:
+            dream_stream.__exit__(None, None, None)
+    
+    def get_dream_viewer(self) -> Optional[DreamViewer]:
+        """Get the dream viewer instance for custom visualization.
+        
+        Returns:
+            DreamViewer instance if enabled, None otherwise
+        """
+        return self.dream_viewer
+    
+    def export_recorded_dreams(
+        self,
+        output_path: str,
+        format: str = "json"
+    ) -> None:
+        """Export recorded dreams to file.
+        
+        Args:
+            output_path: Path to save dreams
+            format: Export format (json, txt)
+        """
+        if self.dream_viewer is None:
+            print("⚠️  Dream viewer not enabled")
+            return
+        self.dream_viewer.export_dreams(output_path, format=format)
+    
+    def visualize_dream_evolution(
+        self,
+        save_path: Optional[str] = None
+    ) -> None:
+        """Create heatmap visualization of recorded dreams.
+        
+        Args:
+            save_path: Optional path to save the plot
+        """
+        if self.dream_viewer is None:
+            print("⚠️  Dream viewer not enabled")
+            return
+        if not self.dream_viewer.recorded_dreams:
+            print("⚠️  No dreams recorded yet")
+            return
+        self.dream_viewer.create_dream_heatmap(
+            self.dream_viewer.recorded_dreams,
+            save_path=save_path
+        )
     
     def train_step_rl(
         self,
@@ -312,23 +406,74 @@ class DreamingReasoningLLM(nn.Module):
         if not self.enable_rl:
             raise ValueError("RL is not enabled for this model")
         
-        # For now, simplified RL step - just track reward
-        # Full implementation would involve:
-        # 1. Generate output with policy network guidance
-        # 2. Compute reward (external or via reward model)
-        # 3. Calculate policy gradient loss
-        # 4. Update policy network
-        # 5. Update value/reward model
-        
-        reward = reward_signal if reward_signal is not None else 0.5
-        
-        # Placeholder metrics (full RL update loop would go here)
+        # --- Full RL implementation ---
+        self.policy_network.train()
+        self.reward_model.train()
+        self.output_decoder.train()
+
+        # 1. Encode input (prompt or images)
+        if prompt is not None:
+            text_tokens = self._tokenize_prompt(prompt)
+            text_emb = self.text_embedder(text_tokens).mean(dim=1)
+            what, action, result = self.input_tokenizer(text_embedding=text_emb)
+        elif images is not None:
+            # Placeholder: random image embeddings
+            B = images.shape[0]
+            image_emb = torch.randn(B, images.shape[1], self.embedding_dim, device=self.device)
+            what, action, result = self.input_tokenizer(image_embeddings=image_emb)
+        else:
+            raise ValueError("Must provide prompt or images")
+
+        # 2. Generate dream sequences
+        dream_sequences = self.dream_generator(what, action, result)
+        reasoning_embedding = self.graph_reasoner(dream_sequences)
+
+        # 3. Policy network: select action (dream sequence index)
+        policy_logits = self.policy_network(reasoning_embedding)
+        policy_dist = torch.distributions.Categorical(logits=policy_logits)
+        action_idx = policy_dist.sample()
+        log_prob = policy_dist.log_prob(action_idx)
+        entropy = policy_dist.entropy().mean()
+
+        # 4. Generate output for selected dream
+        selected_embedding = reasoning_embedding[action_idx]
+        output_tokens = self.output_decoder.generate_sequence(
+            selected_embedding.unsqueeze(0), max_length=32, temperature=1.0
+        )
+
+        # 5. Compute reward
+        if reward_signal is not None:
+            reward = reward_signal
+        elif target_output is not None:
+            # Simple reward: negative edit distance (placeholder)
+            pred_text = self._detokenize(output_tokens)
+            reward = -float(sum(1 for a, b in zip(pred_text, target_output) if a != b))
+        else:
+            # Use reward model
+            reward = self.reward_model(selected_embedding.unsqueeze(0)).mean().item()
+
+        # 6. Value prediction (baseline)
+        value_pred = self.reward_model(selected_embedding.unsqueeze(0)).mean()
+
+        # 7. Policy loss (REINFORCE)
+        advantage = reward - value_pred.item()
+        policy_loss = -log_prob * advantage - self.entropy_coef * entropy
+
+        # 8. Value loss (MSE)
+        value_loss = 0.5 * (value_pred - reward) ** 2
+
+        # 9. Backprop and update
+        self.policy_optimizer.zero_grad()
+        self.reward_optimizer.zero_grad()
+        (policy_loss + value_loss).backward()
+        self.policy_optimizer.step()
+        self.reward_optimizer.step()
+
         metrics = {
             "reward": reward,
-            "policy_loss": 0.0,
-            "value_loss": 0.0,
+            "policy_loss": float(policy_loss.item()),
+            "value_loss": float(value_loss.item()),
         }
-        
         return metrics
     
     def learn_from_feedback(

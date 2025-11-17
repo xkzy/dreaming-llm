@@ -189,43 +189,43 @@ def main() -> None:
     prompts = generate_training_prompts(args.prompts)
     logger.info(f"   Created {len(prompts)} prompts")
     logger.info("")
-    
-        # Create distiller
-        logger.info("🔬 Setting up Ollama distiller...")
-        logger.info(f"   Teacher model: {args.teacher}")
-        logger.info("")
-        logger.info("🎯 Generating reasoning traces from teacher...")
-        logger.info("-" * 60)
 
-        # Generate reasoning traces from teacher
-        try:
-            import ollama
-            traces = []
-            for i, prompt in enumerate(prompts, 1):
-                logger.info(f"Prompt {i}/{len(prompts)}: {prompt[:60]}...")
-                try:
-                    response = ollama.generate(
-                        model=args.teacher,
-                        prompt=prompt,
-                        options={"temperature": 0.8, "num_predict": 128}
-                    )
-                    teacher_response = response.get("response", "")
-                    logger.info(f"  Response: {teacher_response[:80]}...")
-                    traces.append({
-                        "prompt": prompt,
-                        "response": teacher_response
-                    })
-                except Exception as e:
-                    logger.warning(f"  ⚠️  Failed: {e}")
-                    continue
-    
-            logger.info("")
-            logger.info(f"✓ Generated {len(traces)} reasoning traces")
-            logger.info("")
-    
-        except Exception as e:
-            logger.error(f"❌ Failed to generate traces: {e}")
-            return
+    # Create distiller
+    logger.info("🔬 Setting up Ollama distiller...")
+    logger.info(f"   Teacher model: {args.teacher}")
+    logger.info("")
+    logger.info("🎯 Generating reasoning traces from teacher...")
+    logger.info("-" * 60)
+
+    # Generate reasoning traces from teacher
+    try:
+        import ollama
+        traces = []
+        for i, prompt in enumerate(prompts, 1):
+            logger.info(f"Prompt {i}/{len(prompts)}: {prompt[:60]}...")
+            try:
+                response = ollama.generate(
+                    model=args.teacher,
+                    prompt=prompt,
+                    options={"temperature": 0.8, "num_predict": 128}
+                )
+                teacher_response = response.get("response", "")
+                logger.info(f"  Response: {teacher_response[:80]}...")
+                traces.append({
+                    "prompt": prompt,
+                    "response": teacher_response
+                })
+            except Exception as e:
+                logger.warning(f"  ⚠️  Failed: {e}")
+                continue
+
+        logger.info("")
+        logger.info(f"✓ Generated {len(traces)} reasoning traces")
+        logger.info("")
+
+    except Exception as e:
+        logger.error(f"❌ Failed to generate traces: {e}")
+        return
 
         # Distillation training loop
         logger.info("🎯 Training student model on teacher knowledge...")

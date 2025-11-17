@@ -144,11 +144,34 @@ class COCOCaptionDataset(Dataset):
 
         caption = captions[0]["raw"] if captions else "An image"
 
-        # Parse caption into rough triplet (simplified)
-        words = caption.split()
-        subject = words[0] if len(words) > 0 else "subject"
-        action = words[1] if len(words) > 1 else "is"
-        obj = words[2] if len(words) > 2 else "object"
+        # Parse caption into triplet using NLP (spaCy), fallback to heuristic
+        try:
+            import spacy
+            nlp = getattr(self, "_spacy_nlp", None)
+            if nlp is None:
+                nlp = spacy.load("en_core_web_sm")
+                self._spacy_nlp = nlp
+            doc = nlp(caption)
+            subject = None
+            action = None
+            obj = None
+            for token in doc:
+                if token.dep_ in ("nsubj", "nsubjpass") and subject is None:
+                    subject = token.text
+                if token.pos_ == "VERB" and action is None:
+                    action = token.lemma_
+                if token.dep_ in ("dobj", "attr", "pobj") and obj is None:
+                    obj = token.text
+            # Fallbacks if not found
+            subject = subject or (doc[0].text if len(doc) > 0 else "subject")
+            action = action or (doc[1].lemma_ if len(doc) > 1 and doc[1].pos_ == "VERB" else "is")
+            obj = obj or (doc[-1].text if len(doc) > 2 else "object")
+        except Exception:
+            # Fallback: simple heuristic
+            words = caption.split()
+            subject = words[0] if len(words) > 0 else "subject"
+            action = words[1] if len(words) > 1 else "is"
+            obj = words[2] if len(words) > 2 else "object"
 
         # Transform image
         if image and isinstance(image, Image.Image):

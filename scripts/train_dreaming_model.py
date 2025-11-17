@@ -42,7 +42,7 @@ def train_step(model, text_tokens, target_tokens, optimizer):
 
 def main():
     parser = argparse.ArgumentParser(description="Train DreamingReasoningLLM")
-    parser.add_argument("--device", default="cpu", help="Device (cpu/cuda)")
+    parser.add_argument("--device", default="cuda", help="Device (cpu/cuda)")
     parser.add_argument("--epochs", type=int, default=5, help="Training epochs")
     parser.add_argument("--batch-size", type=int, default=4, help="Batch size")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")

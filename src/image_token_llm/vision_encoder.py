@@ -29,33 +29,41 @@ class VisionEncoder(nn.Module):
         config: ImageTokenizerConfig,
         backbone: str = "clip",
         freeze_backbone: bool = False,
+        device: str = "cpu",
     ) -> None:
+        """
+        Args:
+            config: ImageTokenizerConfig
+            backbone: "clip", "resnet", or "lite"
+            freeze_backbone: If True, disables gradient for backbone
+            device: "cpu", "cuda", or torch.device
+        """
         super().__init__()
         self.config = config
         self.backbone_type = backbone
         self.embedding_dim = config.embedding_dim
+        self.device = torch.device(device)
 
         if backbone == "clip":
-            if CLIPModel is None or CLIPProcessor is None:  # pragma: no cover
+            if CLIPModel is None or CLIPProcessor is None:
                 raise ImportError(
                     "transformers is required for the CLIP backbone. "
                     "Install it via `pip install transformers` or use the "
                     "`lite` backbone."
                 )
-
             self.processor = CLIPProcessor.from_pretrained(
                 "openai/clip-vit-base-patch32"
             )
             self.model = CLIPModel.from_pretrained(
                 "openai/clip-vit-base-patch32"
-            )
-            # CLIP get_image_features() outputs projection_dim (512)
-            # not hidden_size (768)
+            ).to(self.device)
             self.feature_dim = self.model.vision_model.config.projection_dim
             self.embedding_dim = self.feature_dim
             config.embedding_dim = self.feature_dim
         elif backbone == "resnet":
-            self.model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
+            self.model = resnet50(
+                weights=ResNet50_Weights.IMAGENET1K_V2
+            ).to(self.device)
             self.model.fc = nn.Identity()
             self.feature_dim = 2048
             self.transform = T.Compose([
@@ -79,7 +87,7 @@ class VisionEncoder(nn.Module):
                 nn.Linear(128, config.embedding_dim),
                 nn.LayerNorm(config.embedding_dim),
                 nn.GELU(),
-            )
+            ).to(self.device)
             self.feature_dim = config.embedding_dim
         else:
             raise ValueError(f"Unsupported backbone: {backbone}")
@@ -88,45 +96,55 @@ class VisionEncoder(nn.Module):
             for param in self.model.parameters():
                 param.requires_grad = False
 
-        # Project to target embedding dimension
-        # For CLIP, always use 512 for in/out features to match ViT-B/32 output
         if backbone == "clip":
             self.projector = nn.Sequential(
                 nn.Linear(512, 512),
                 nn.LayerNorm(512),
                 nn.GELU(),
                 nn.Linear(512, 512),
-            )
+            ).to(self.device)
         else:
             self.projector = nn.Sequential(
                 nn.Linear(self.feature_dim, config.embedding_dim),
                 nn.LayerNorm(config.embedding_dim),
                 nn.GELU(),
                 nn.Linear(config.embedding_dim, config.embedding_dim),
-            )
+            ).to(self.device)
 
-    def forward(self, images: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        images: torch.Tensor,
+        device: str = None,
+        batch_size: int = 32,
+    ) -> torch.Tensor:
         """
         Encode images into semantic embeddings.
-        
+        Supports large batches and device selection.
         Args:
-            images: Tensor of shape [B, C, H, W]
-        
+            images: Tensor [B, C, H, W] or [C, H, W]
+            device: Optional override device
+            batch_size: Batch size for chunked processing (for large B)
         Returns:
-            Embeddings of shape [B, embedding_dim]
+            Embeddings [B, embedding_dim]
         """
+        dev = torch.device(device) if device is not None else self.device
         if images.dim() == 3:
             images = images.unsqueeze(0)
-
-        if self.backbone_type == "clip":
-            features = self.model.get_image_features(pixel_values=images)
-        elif self.backbone_type == "resnet":
-            features = self.model(self.transform(images))
-        else:  # lite backbone
-            features = self.model(images)
-
-        embeddings = self.projector(features)
-        return embeddings
+        images = images.to(dev)
+        outputs = []
+        n = images.shape[0]
+        for i in range(0, n, batch_size):
+            batch = images[i : i + batch_size]
+            with torch.no_grad():
+                if self.backbone_type == "clip":
+                    feats = self.model.get_image_features(pixel_values=batch)
+                elif self.backbone_type == "resnet":
+                    feats = self.model(self.transform(batch))
+                else:
+                    feats = self.model(batch)
+                emb = self.projector(feats)
+                outputs.append(emb.cpu())
+        return torch.cat(outputs, dim=0)
 
 
 class TripletEncoder(nn.Module):

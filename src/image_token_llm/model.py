@@ -1,52 +1,119 @@
-"""Composite multimodal LLM that reasons over images, graphs, and text."""
+"""
+Compatibility shim for legacy imports.
+
+This module re-exports DreamingReasoningLLM so that code importing
+ImageTokenReasoningLLM keeps working while the project fully transitions
+to the dreaming-based architecture.
+"""
+
+from __future__ import annotations
+from .dreaming_model import DreamingReasoningLLM
+
+# Deprecated alias for backward compatibility
+class ImageTokenReasoningLLM(DreamingReasoningLLM):
+    """
+    Deprecated alias for DreamingReasoningLLM.
+    Please import DreamingReasoningLLM from image_token_llm.dreaming_model instead.
+    """
+    pass
+"""Compatibility shim for legacy imports."""Composite multimodal LLM that reasons over images, graphs, and text."""
+
+
+
+This module now re-exports :class:`DreamingReasoningLLM` so that older codefrom __future__ import annotations
+
+that imported :class:`ImageTokenReasoningLLM` keeps working while the project
+
+fully transitions to the dreaming-based architecture.import json
+
+"""from pathlib import Path
+
+from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
-
 import torch
-import torch.nn as nn
+
+from typing import Optionalimport torch.nn as nn
+
 import torch.nn.functional as F
 
-from image_token_llm.config import (  # type: ignore[import]
+from .config import ExperimentConfig  # type: ignore[import]
+
+from .dreaming_model import DreamingReasoningLLM  # type: ignore[import]from image_token_llm.config import (  # type: ignore[import]
+
     ExperimentConfig,
+
 )
-from image_token_llm.graph_attention import (  # type: ignore[import]
-    GraphRAGEnhanced,
+
+class ImageTokenReasoningLLM(DreamingReasoningLLM):from image_token_llm.graph_attention import (  # type: ignore[import]
+
+    """Deprecated alias for :class:`DreamingReasoningLLM`.    GraphRAGEnhanced,
+
 )
-from image_token_llm.graph_rag import (  # type: ignore[import]
-    Triplet as GraphTriplet,
-)
+
+    Args mirror the new model so existing scripts continue to operate whilefrom image_token_llm.graph_rag import (  # type: ignore[import]
+
+    emitting a soft warning to migrate.    Triplet as GraphTriplet,
+
+    """)
+
 from image_token_llm.rl_learning import (  # type: ignore[import]
-    PolicyNetwork,
-    RewardModel,
-    RLContinuousLearner,
-)
-from image_token_llm.text_generation import (  # type: ignore[import]
-    ImageAwareTextDecoder,
-    SimpleTokenizer,
-    build_context_memory,
-)
-from image_token_llm.vision_encoder import (  # type: ignore[import]
-    TripletEncoder,
-)
 
-TripletImage = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+    def __init__(    PolicyNetwork,
 
+        self,    RewardModel,
 
+        config: Optional[ExperimentConfig] = None,    RLContinuousLearner,
 
+        device: Optional[str] = None,)
 
-class MoEGatingNetwork(nn.Module):
-    """Simple gating network for MoE selection (softmax over experts)."""
+        embedding_dim: int = 512,from image_token_llm.text_generation import (  # type: ignore[import]
 
-    def __init__(self, input_dim: int, num_experts: int):
+        vocab_size: int = 4096,    ImageAwareTextDecoder,
+
+        enable_rl: bool = True,    SimpleTokenizer,
+
+    ) -> None:    build_context_memory,
+
         super().__init__()
-        self.fc = nn.Linear(input_dim, num_experts)
+
+            config=config,from image_token_llm.vision_encoder import (  # type: ignore[import]
+
+            device=device,    TripletEncoder,
+
+            embedding_dim=embedding_dim,)
+
+            vocab_size=vocab_size,
+
+            enable_rl=enable_rl,TripletImage = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+
+        )
+
+
+
+        import warnings
+
+
+
+        warnings.warn(class MoEGatingNetwork(nn.Module):
+
+            "ImageTokenReasoningLLM is deprecated. Please import "    """Simple gating network for MoE selection (softmax over experts)."""
+
+            "DreamingReasoningLLM from image_token_llm.dreaming_model instead.",
+
+            DeprecationWarning,    def __init__(self, input_dim: int, num_experts: int):
+
+            stacklevel=2,        super().__init__()
+
+        )        self.fc = nn.Linear(input_dim, num_experts)
+
+
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.softmax(self.fc(x), dim=-1)
+
+__all__ = ["ImageTokenReasoningLLM", "DreamingReasoningLLM"]        return torch.softmax(self.fc(x), dim=-1)
+
 
 
 class ImageTokenReasoningLLM(nn.Module):
@@ -154,10 +221,9 @@ class ImageTokenReasoningLLM(nn.Module):
 
         self.last_metadata: Dict[str, object] = {}
 
-    # ------------------------------------------------------------------
-    # Encoding utilities
-    # ------------------------------------------------------------------
-    @staticmethod
+        # Use HuggingFace AutoTokenizer for text
+        tokenizer_name = getattr(self.config, "hf_tokenizer_name", "bert-base-uncased")
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
     def _ensure_batch(tensor: torch.Tensor) -> torch.Tensor:
         if tensor.dim() == 3:
             return tensor.unsqueeze(0)
@@ -317,6 +383,7 @@ class ImageTokenReasoningLLM(nn.Module):
             prompt,
             add_special_tokens=True,
             max_length=self.config.text_decoder.max_seq_len,
+            truncation=True
         )
         max_tokens = max_new_tokens or (
             self.config.text_decoder.max_seq_len // 2
@@ -348,8 +415,8 @@ class ImageTokenReasoningLLM(nn.Module):
                 temperature,
             )
         # Greedy decode from combined logits
-        new_token_ids = torch.argmax(combined_logits, dim=-1).squeeze(0).tolist()
-        generated_text = self.tokenizer.decode(new_token_ids)
+            new_token_ids = torch.argmax(combined_logits, dim=-1).squeeze(0).tolist()
+            generated_text = self.tokenizer.decode(new_token_ids, skip_special_tokens=True)
 
         rl_metrics: Dict[str, float] = {}
         if self.rl_learner is not None and image_triplets:
@@ -529,8 +596,8 @@ class ImageTokenReasoningLLM(nn.Module):
             "4. Tokenizer + config files mirror the runtime state for"
             " reproducibility.\n"
         )
-        readme.write_text(readme_text, encoding="utf-8")
-
+            new_token_ids = torch.argmax(combined_logits, dim=-1).squeeze(0).tolist()
+            generated_text = self.tokenizer.decode(new_token_ids, skip_special_tokens=True)
         self.last_metadata["bundle_path"] = str(target)
         return target
 

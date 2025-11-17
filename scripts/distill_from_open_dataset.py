@@ -2,8 +2,6 @@
 """
 Distill DreamingReasoningLLM from open datasets (COCO captions, LAION, OpenAssistant, etc).
 
-import torch
-
 Usage:
     python scripts/distill_from_open_dataset.py --dataset coco_captions --data-dir ./data/coco --output ./models/distilled_from_coco --device cuda
     python scripts/distill_from_open_dataset.py --dataset openassistant --data-dir ./data/openassistant --output ./models/distilled_from_oa --device cuda
@@ -178,24 +176,24 @@ def main():
             try:
                 coco_pairs = load_coco_captions(coco_dir, limit)
                 all_pairs.extend(coco_pairs)
-            except Exception:
-                logger.warning("Failed to load COCO captions from %s", coco_dir)
+            except Exception as e:
+                logger.warning("Failed to load COCO captions from %s: %s", coco_dir, e)
         # OpenAssistant
         oa_dir = root_dir / "openassistant"
         if oa_dir.exists():
             try:
                 oa_pairs = load_openassistant(oa_dir, limit)
                 all_pairs.extend(oa_pairs)
-            except Exception:
-                logger.warning("Failed to load OpenAssistant from %s", oa_dir)
+            except Exception as e:
+                logger.warning("Failed to load OpenAssistant from %s: %s", oa_dir, e)
         # LAION
         laion_dir = root_dir / "laion"
         if laion_dir.exists():
             try:
                 laion_pairs = load_laion(laion_dir, limit)
                 all_pairs.extend(laion_pairs)
-            except Exception:
-                logger.warning("Failed to load LAION from %s", laion_dir)
+            except Exception as e:
+                logger.warning("Failed to load LAION from %s: %s", laion_dir, e)
 
         return all_pairs
 
@@ -292,7 +290,7 @@ def main():
             accumulate_steps = max(1, args.accumulate_steps)
     else:
         use_amp = args.fp16 and args.device.startswith("cuda")
-        scaler = torch.cuda.amp.GradScaler() if use_amp else None
+        scaler = torch.amp.GradScaler('cuda') if use_amp else None
         accumulate_steps = max(1, args.accumulate_steps)
     # Use ignore_index for padding tokens
     # Ensure pad_token_id is an int, fallback to 0 if not found
@@ -371,7 +369,7 @@ def main():
                 total_loss += loss_value
             else:
                 if use_amp:
-                    with torch.cuda.amp.autocast():
+                    with torch.amp.autocast('cuda'):
                         loss = loss_fn(
                             logits.reshape(-1, logits.size(-1)),
                             target_ids.reshape(-1),
@@ -407,12 +405,16 @@ def main():
             with torch.no_grad():
                 total_val_loss = 0.0
                 import math
+                # Use public tokenize_prompt if available, else fallback to private
+                tokenize_fn = getattr(model, "tokenize_prompt", None)
+                if not callable(tokenize_fn):
+                    tokenize_fn = getattr(model, "_tokenize_prompt")
                 for j in range(0, len(val_pairs), args.batch_size):
                     vbatch = val_pairs[j:j+args.batch_size]
                     vprompts = [ex["prompt"] for ex in vbatch]
                     vtargets = [ex["response"] for ex in vbatch]
-                    vin_ids = [model._tokenize_prompt(p) for p in vprompts]
-                    vt_ids = [model._tokenize_prompt(t) for t in vtargets]
+                    vin_ids = [tokenize_fn(p) for p in vprompts]
+                    vt_ids = [tokenize_fn(t) for t in vtargets]
                     max_in = max(x.shape[1] for x in vin_ids)
                     max_out = max(x.shape[1] for x in vt_ids)
                     vin_ids = [nn.functional.pad(x, (0, max_in - x.shape[1])) for x in vin_ids]
@@ -445,12 +447,11 @@ def main():
     # Save model
     Path(args.output).mkdir(parents=True, exist_ok=True)
     model.save_pretrained(args.output)
-    # Save metrics
     try:
         with open(Path(args.output) / "metrics.json", "w") as mf:
             json.dump(metrics, mf, indent=2)
-    except Exception:
-        logger.warning("Failed to save metrics.json")
+    except Exception as e:
+        logger.warning("Failed to save metrics.json: %s", e)
 
     logger.info(f"✓ Model saved to {args.output}")
 

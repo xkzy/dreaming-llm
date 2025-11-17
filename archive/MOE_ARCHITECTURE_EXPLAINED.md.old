@@ -1,0 +1,421 @@
+# MoE Multi-Modal LLM Architecture Explained
+
+![Architecture Diagram](./moe_architecture.svg)
+
+## Overview
+
+The **Mixture-of-Experts (MoE) Multi-Modal LLM** is a sophisticated neural architecture that combines vision, text, and graph reasoning capabilities using a mixture-of-experts approach. This document explains how each component works and how they integrate to generate intelligent responses.
+
+## Architecture Flow
+
+### 1. Input Layer
+
+The system accepts three types of input:
+
+#### Image Triplets
+- **What Image**: Shows the initial state/object (3×224×224)
+- **Action Image**: Shows the action being performed (3×224×224)
+- **Result Image**: Shows the outcome after the action (3×224×224)
+
+Each image is processed through the Vision Expert Layer.
+
+#### Text Prompt
+- Natural language query: "Describe the scene" or "What happened?"
+- Processed through the Text Expert Layer
+
+#### Graph Context
+- Seed nodes for knowledge graph traversal
+- Used by the Graph Expert Layer to retrieve relevant knowledge
+
+---
+
+## 2. Vision Expert Layer (MoE)
+
+### How It Works:
+
+1. **CLIP Encoder**:
+   - Uses OpenAI's CLIP ViT-B/32 (Vision Transformer)
+   - Extracts visual features from each image triplet
+   - Output: 512-dimensional embeddings
+
+2. **Multiple Experts** (2 experts):
+   - **Expert 1 - Spatial Analysis**: Focuses on spatial relationships, positions, and geometric features
+   - **Expert 2 - Semantic Features**: Focuses on object recognition, semantic content, and high-level concepts
+
+3. **Gating Network**:
+   ```python
+   # Learns which expert to use for each input
+   weights = softmax(GatingNet(clip_features))
+   # weights = [w₁, w₂] where w₁ + w₂ = 1
+   ```
+
+4. **Expert Fusion**:
+   ```python
+   fused_vision = w₁ × expert₁(features) + w₂ × expert₂(features)
+   ```
+   - The gating network dynamically weights each expert's contribution
+   - Produces a single 512-dimensional vision embedding
+
+### Why MoE for Vision?
+- **Specialization**: Different experts specialize in different visual aspects
+- **Efficiency**: Only the most relevant experts are heavily weighted
+- **Adaptability**: The gating network learns optimal expert combinations for different image types
+
+---
+
+## 3. Text Expert Layer (MoE)
+
+### How It Works:
+
+1. **Text Encoding**:
+   - Character-level or BPE tokenization
+   - Embedded into continuous vectors
+
+2. **Multiple Experts** (2 experts):
+   - **Expert 1 - Language Modeling**: Focuses on syntax, grammar, and linguistic patterns
+   - **Expert 2 - Context Integration**: Focuses on semantic understanding and context fusion
+
+3. **Gating Network**:
+   ```python
+   text_weights = softmax(TextGatingNet(text_embeddings))
+   ```
+
+4. **Expert Fusion**:
+   ```python
+   fused_text = w₁ × text_expert₁(embeddings) + w₂ × text_expert₂(embeddings)
+   ```
+   - Output: 512-dimensional text embedding
+
+### Why MoE for Text?
+- **Task Specialization**: Some experts handle generation, others handle comprehension
+- **Context-Aware**: Gating adapts to different prompt types (questions, descriptions, commands)
+
+---
+
+## 4. Graph Expert Layer (MoE)
+
+### How It Works:
+
+1. **Knowledge Graph Traversal**:
+   - Starts from seed nodes (provided in input)
+   - Performs multi-hop graph traversal
+   - Retrieves relevant knowledge from structured graph database
+
+2. **Multiple Experts** (2 experts):
+   - **Expert 1 - Multi-hop Traversal**: Specializes in exploring graph paths and relationships
+   - **Expert 2 - Attention Aggregation**: Specializes in combining information from multiple graph nodes
+
+3. **Gating Network**:
+   ```python
+   graph_weights = softmax(GraphGatingNet(graph_features))
+   ```
+
+4. **Graph RAG (Retrieval-Augmented Generation)**:
+   - Retrieves relevant facts from knowledge graph
+   - Aggregates neighborhood information
+   - Output: 512-dimensional graph embedding
+
+### Why MoE for Graphs?
+- **Search Strategy**: Different experts use different traversal strategies
+- **Aggregation Methods**: Various ways to combine multi-hop information
+- **Relevance Filtering**: Experts learn to filter important vs. irrelevant knowledge
+
+---
+
+## 5. Memory Integration
+
+### Multi-Modal Fusion:
+
+All three modalities are combined into a unified memory representation:
+
+```python
+fused_memory = vision_embedding + text_embedding + graph_embedding
+# Shape: (batch_size, 512)
+```
+
+### Key Features:
+- **Equal Dimensionality**: All embeddings are 512-dimensional for seamless fusion
+- **Residual Connection**: Each modality contributes additively
+- **Rich Context**: The fused memory contains visual, linguistic, and factual knowledge
+
+This fused memory serves as the **context** for the transformer decoder.
+
+---
+
+## 6. Transformer Decoder
+
+### Architecture Components:
+
+1. **Self-Attention** (Causal):
+   - 8 attention heads
+   - Attends to previously generated tokens
+   - Causal masking prevents looking ahead
+
+2. **Cross-Attention**:
+   - Attends to the fused multi-modal memory
+   - Allows the decoder to query visual, text, and graph information
+   - Dynamic attention weights focus on relevant memory parts
+
+3. **Feed-Forward Network**:
+   - 2-layer MLP with GELU activation
+   - Projects and transforms representations
+
+### Decoding Process:
+
+```python
+for t in range(max_length):
+    # Self-attention on generated tokens
+    hidden = self_attention(generated_tokens[:t])
+    
+    # Cross-attention to multi-modal memory
+    context = cross_attention(hidden, fused_memory)
+    
+    # Feed-forward transformation
+    output = feed_forward(context)
+    
+    # Predict next token
+    next_token = argmax(output_projection(output))
+    generated_tokens.append(next_token)
+```
+
+---
+
+## 7. Output Generation
+
+### Token-by-Token Decoding:
+
+1. **Vocabulary Projection**: Maps hidden states to vocabulary logits
+2. **Sampling Strategies**:
+   - **Greedy**: Select highest probability token
+   - **Beam Search**: Maintain top-k hypotheses
+   - **Nucleus Sampling**: Sample from top-p probability mass
+
+3. **Output**: "A person is opening a door and walking through..."
+
+---
+
+## 8. RL Feedback Loop (Continuous Learning)
+
+### Reinforcement Learning Component:
+
+1. **Policy Network**:
+   - Learns action selection (which tokens to generate)
+   - Trained with policy gradients
+
+2. **Reward Model**:
+   - Evaluates generated outputs
+   - Provides feedback signal for learning
+
+3. **Continuous Learning**:
+   ```python
+   # Online learning loop
+   for trajectory in experience_buffer:
+       policy_loss = compute_policy_gradient(trajectory, rewards)
+       value_loss = compute_value_loss(trajectory, returns)
+       
+       # Update model parameters
+       optimizer.step()
+   ```
+
+4. **Elastic Weight Consolidation (EWC)**:
+   - Prevents catastrophic forgetting
+   - Preserves important weights from previous tasks
+
+### Benefits:
+- **Adaptive**: Model improves from user feedback
+- **Task-Specific**: Fine-tunes to specific use cases
+- **Memory-Efficient**: Doesn't require full retraining
+
+---
+
+## Key Design Decisions
+
+### Why 512 Dimensions?
+- **CLIP Standard**: CLIP ViT-B/32 outputs 512-dim embeddings
+- **Computational Efficiency**: Balanced between expressiveness and compute
+- **Cross-Modal Alignment**: Easier to fuse modalities with same dimensionality
+
+### Why Mixture-of-Experts?
+- **Specialization**: Experts develop distinct capabilities
+- **Sparse Activation**: Only activate relevant experts (efficiency)
+- **Scalability**: Can add more experts without linear cost increase
+- **Interpretability**: Gating weights show which expert is "thinking"
+
+### Why Multi-Modal?
+- **Richer Understanding**: Text alone can't capture visual nuances
+- **Grounding**: Images ground abstract text in concrete visuals
+- **Knowledge**: Graphs provide factual, structured information
+- **Robustness**: Multiple modalities provide redundancy
+
+---
+
+## Data Flow Example
+
+Let's trace a complete forward pass:
+
+**Input**:
+- Images: 3 photos showing "person opening door"
+- Text: "What is happening in these images?"
+- Graph: Seed nodes ["door", "person", "action"]
+
+**Processing**:
+
+1. **Vision Layer**:
+   - CLIP encodes each image → 512-dim
+   - Vision Expert 1 (spatial): High weight (0.7) - detects door position
+   - Vision Expert 2 (semantic): Low weight (0.3) - recognizes objects
+   - Fused: Emphasizes spatial relationships
+
+2. **Text Layer**:
+   - Tokenize query → embeddings
+   - Text Expert 1 (language): Low weight (0.3) - basic grammar
+   - Text Expert 2 (context): High weight (0.7) - understands "what is happening" needs explanation
+   - Fused: Emphasizes explanatory context
+
+3. **Graph Layer**:
+   - Start from ["door", "person", "action"]
+   - Graph Expert 1 (traversal): High weight (0.6) - explores "open" action relationships
+   - Graph Expert 2 (aggregation): Weight (0.4) - combines facts about doors and people
+   - Fused: Retrieved facts about door-opening actions
+
+4. **Memory Integration**:
+   - Combines all three: spatial layout + query intent + factual knowledge
+   - 512-dim unified representation
+
+5. **Decoder**:
+   - Generates: "A person is opening a door and stepping through the doorway into another room."
+   - Uses cross-attention to reference visual features, query context, and graph facts
+
+6. **RL Feedback**:
+   - User confirms accuracy → positive reward
+   - Updates policy to favor this reasoning pattern
+
+---
+
+## Performance Characteristics
+
+### Strengths:
+- ✅ **Multi-modal reasoning**: Seamlessly integrates vision, text, and knowledge
+- ✅ **Adaptive specialization**: MoE experts develop unique capabilities
+- ✅ **Continuous improvement**: RL enables online learning
+- ✅ **Interpretable**: Gating weights show expert contributions
+
+### Trade-offs:
+- ⚠️ **Complexity**: More parameters than single-expert models
+- ⚠️ **Training**: Requires balanced multi-modal training data
+- ⚠️ **Inference**: Multiple expert evaluations per layer
+
+---
+
+## Training Pipeline
+
+1. **Pre-training** (Knowledge Distillation):
+   ```bash
+   python scripts/create_pretrained_model.py \
+       --teacher llama2 \
+       --prompts 100 \
+       --output ./pretrained
+   ```
+   - Distills knowledge from large teacher model (Ollama)
+   - Initializes weights with strong language priors
+
+2. **Image Tokenizer Training**:
+   ```bash
+   python scripts/train_image_tokenizer.py \
+       --data ./data/coco/train2017 \
+       --epochs 10 \
+       --batch-size 16
+   ```
+   - Trains vision encoder on COCO images
+   - Learns visual feature extraction
+
+3. **Multi-modal Fine-tuning**:
+   - Joint training on vision + text + graph data
+   - Optimizes cross-modal alignment
+   - Trains MoE gating networks
+
+4. **RL Fine-tuning**:
+   - Online learning from user interactions
+   - Policy gradient updates
+   - EWC to prevent forgetting
+
+---
+
+## Code Structure
+
+```
+src/image_token_llm/
+├── model.py              # Main MoE LLM model
+├── vision_encoder.py     # CLIP + Vision experts
+├── text_generation.py    # Transformer decoder
+├── graph_rag.py          # Graph reasoning
+├── rl_learning.py        # RL training loop
+├── knowledge_transfer.py # Ollama distillation
+└── config.py            # MoEConfig, ExperimentConfig
+```
+
+---
+
+## Usage Example
+
+```python
+from image_token_llm import ImageTokenReasoningLLM
+import torch
+from PIL import Image
+
+# Load model
+model = ImageTokenReasoningLLM.load_from_bundle("./pretrained")
+
+# Prepare inputs
+what_img = Image.open("before.jpg")
+action_img = Image.open("during.jpg")
+result_img = Image.open("after.jpg")
+
+# Convert to tensors (3, 224, 224)
+images = preprocess_images([what_img, action_img, result_img])
+
+# Generate description
+output = model.generate(
+    prompt="Describe what happened",
+    image_triplets=[(images[0], images[1], images[2])],
+    temperature=0.8,
+    max_length=100
+)
+
+print(output)
+# Output: "A person approached a door, turned the handle, 
+#          and pushed it open to enter the next room."
+```
+
+---
+
+## Future Enhancements
+
+1. **More Experts**: Scale to 4-8 experts per modality
+2. **Dynamic Routing**: Learn to add/remove experts dynamically
+3. **Hierarchical MoE**: Experts at multiple decoder layers
+4. **Multi-GPU**: Distribute experts across GPUs for efficiency
+5. **Sparse Attention**: Combine with sparse transformer for long context
+
+---
+
+## References
+
+- **MoE**: Shazeer et al., "Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer" (2017)
+- **CLIP**: Radford et al., "Learning Transferable Visual Models From Natural Language Supervision" (2021)
+- **Graph RAG**: Lewis et al., "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks" (2020)
+- **RL for LLMs**: Ziegler et al., "Fine-Tuning Language Models from Human Preferences" (2019)
+
+---
+
+## Summary
+
+The **MoE Multi-Modal LLM** represents a sophisticated approach to multi-modal reasoning by:
+
+1. **Specializing** experts for different aspects of vision, text, and graph processing
+2. **Dynamically routing** inputs to the most relevant experts via gating networks
+3. **Fusing** multi-modal information into a unified memory representation
+4. **Generating** coherent text that reflects visual, linguistic, and factual understanding
+5. **Learning continuously** from user feedback through reinforcement learning
+
+This architecture enables robust, interpretable, and adaptive multi-modal AI systems.

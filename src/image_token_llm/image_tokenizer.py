@@ -8,23 +8,33 @@ import torch
 
 from .config import ImageTokenizerConfig
 
+from .vision_encoder import VisionEncoder
 
 class ImageTokenizer:
-    """Simple patch-based tokenizer placeholder."""
-
-    def __init__(self, config: ImageTokenizerConfig) -> None:
+    """
+    Image tokenizer using a pretrained CLIP vision encoder for semantic tokens.
+    This replaces the old patch-based approach with CLIP embeddings.
+    """
+    def __init__(
+        self, config: ImageTokenizerConfig, backbone: str = "clip"
+    ) -> None:
         self.config = config
+        self.encoder = VisionEncoder(config, backbone=backbone)
 
     def tokenize(self, batches: Iterable[torch.Tensor]) -> List[torch.Tensor]:
+        """
+        Tokenize a batch of images into CLIP-based semantic tokens.
+        Args:
+            batches: Iterable of [C, H, W] tensors
+        Returns:
+            List of [embedding_dim] tensors
+        """
         tokens: List[torch.Tensor] = []
         for image in batches:
             if image.ndim != 3:
                 raise ValueError("Each image must be a 3D tensor [C, H, W].")
-            patches = image.unfold(
-                1, self.config.patch_size, self.config.patch_size
-            )
-            patches = patches.unfold(
-                2, self.config.patch_size, self.config.patch_size
-            )
-            tokens.append(patches.flatten(1))
+            image = image.unsqueeze(0)  # Add batch dim
+            with torch.no_grad():
+                token = self.encoder(image).squeeze(0)
+            tokens.append(token)
         return tokens

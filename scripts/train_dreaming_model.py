@@ -74,7 +74,10 @@ def main():
         enable_rl=args.enable_rl
     )
     
-    print(f"✓ Model created: {sum(p.numel() for p in model.parameters())} params")
+    # Model summary
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"✓ Model created: {total_params} params")
+    print()
     
     # Optimizer (exclude RL components to avoid issues)
     trainable_params = []
@@ -114,8 +117,10 @@ def main():
     model.save(str(output_path))
     
     print(f"\n💾 Model saved to: {output_path}")
-    print(f"   Weights: dreaming_model_weights.pt")
-    print(f"   Config: config.json")
+    print("\n" + "="*70)
+    print("Model saved to:", args.output)
+    print("   Weights: dreaming_model_weights.pt")
+    print("   Config: config.json")
     
     # Test generation
     print("\n🧪 Testing generation...")

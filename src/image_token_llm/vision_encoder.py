@@ -10,10 +10,17 @@ import torchvision.transforms as T
 from torchvision.models import resnet50, ResNet50_Weights
 
 try:  # Optional heavy dependency
-    from transformers import CLIPModel, CLIPProcessor
+    from transformers import (
+        CLIPModel,
+        CLIPProcessor,
+        ViTModel,
+        ViTImageProcessor,
+    )
 except ImportError:  # pragma: no cover - optional dependency
     CLIPModel = None  # type: ignore[assignment]
     CLIPProcessor = None  # type: ignore[assignment]
+    ViTModel = None  # type: ignore[assignment]
+    ViTImageProcessor = None  # type: ignore[assignment]
 
 from .config import ImageTokenizerConfig
 
@@ -60,6 +67,48 @@ class VisionEncoder(nn.Module):
             self.feature_dim = self.model.vision_model.config.projection_dim
             self.embedding_dim = self.feature_dim
             config.embedding_dim = self.feature_dim
+        elif backbone == "vit":
+            if ViTModel is None or ViTImageProcessor is None:
+                raise ImportError(
+                    "transformers is required for the ViT backbone. "
+                    "Install it via `pip install transformers` or use the "
+                    "`lite` backbone."
+                )
+            self.processor = ViTImageProcessor.from_pretrained(
+                "google/vit-base-patch16-224"
+            )
+            self.model = ViTModel.from_pretrained(
+                "google/vit-base-patch16-224"
+            ).to(self.device)
+            self.feature_dim = self.model.config.hidden_size  # 768
+            self.embedding_dim = self.feature_dim
+            config.embedding_dim = self.feature_dim
+            
+            # Multi-scale feature pyramid layers
+            self.pyramid_layers = nn.ModuleList([
+                nn.Sequential(
+                    nn.Conv2d(self.feature_dim, self.feature_dim // 2, 3, 2, 1),
+                    nn.LayerNorm([self.feature_dim // 2, 14, 14]),
+                    nn.GELU(),
+                ),
+                nn.Sequential(
+                    nn.Conv2d(self.feature_dim // 2, self.feature_dim // 4, 3, 2, 1),
+                    nn.LayerNorm([self.feature_dim // 4, 7, 7]),
+                    nn.GELU(),
+                ),
+            ]).to(self.device)
+            
+            # Feature aggregation
+            self.pyramid_aggregator = nn.Sequential(
+                nn.AdaptiveAvgPool2d((1, 1)),
+                nn.Flatten(),
+                nn.Linear(
+                    self.feature_dim + self.feature_dim // 2 + self.feature_dim // 4,
+                    self.feature_dim
+                ),
+                nn.LayerNorm(self.feature_dim),
+                nn.GELU(),
+            ).to(self.device)
         elif backbone == "resnet":
             self.model = resnet50(
                 weights=ResNet50_Weights.IMAGENET1K_V2
@@ -134,10 +183,38 @@ class VisionEncoder(nn.Module):
         outputs = []
         n = images.shape[0]
         for i in range(0, n, batch_size):
-            batch = images[i : i + batch_size]
+            batch = images[i:i + batch_size]
             with torch.no_grad():
                 if self.backbone_type == "clip":
                     feats = self.model.get_image_features(pixel_values=batch)
+                elif self.backbone_type == "vit":
+                    outputs_vit = self.model(pixel_values=batch)
+                    # Get patch embeddings: (B, num_patches, hidden_size)
+                    patch_embs = outputs_vit.last_hidden_state
+                    B, N, D = patch_embs.shape
+                    
+                    # Reshape to spatial grid (assuming 14x14 patches)
+                    grid_size = int(N ** 0.5)
+                    spatial = patch_embs[:, 1:, :].transpose(1, 2)
+                    spatial = spatial.view(B, D, grid_size, grid_size)
+                    
+                    # Build feature pyramid
+                    pyramid_features = [spatial]
+                    for layer in self.pyramid_layers:
+                        spatial = layer(spatial)
+                        pyramid_features.append(spatial)
+                    
+                    # Concatenate and aggregate
+                    pyramid_cat = torch.cat([
+                        f.flatten(1) for f in pyramid_features
+                    ], dim=1)
+                    feats = self.pyramid_aggregator(
+                        pyramid_cat.view(
+                            B, -1,
+                            pyramid_features[0].shape[-2],
+                            pyramid_features[0].shape[-1]
+                        )
+                    )
                 elif self.backbone_type == "resnet":
                     feats = self.model(self.transform(batch))
                 else:

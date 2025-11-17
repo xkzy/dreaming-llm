@@ -17,6 +17,7 @@ class InputTokenizer(nn.Module):
     
     Text inputs: Uses a learned text→image projector to create synthetic image embeddings.
     Image inputs: Decomposes into (what, action, result) triplets via scene understanding.
+    Improvements: CLIP-style contrastive alignment, projection bottleneck, noise robustness.
     """
     
     def __init__(self, config: DreamingConfig, embedding_dim: int = 512):
@@ -24,9 +25,22 @@ class InputTokenizer(nn.Module):
         self.config = config
         self.embedding_dim = embedding_dim
         
+        # Shared projection bottleneck for semantic alignment (512 -> 256 -> 512)
+        bottleneck_dim = embedding_dim // 2
+        self.text_bottleneck = nn.Sequential(
+            nn.Linear(embedding_dim, bottleneck_dim),
+            nn.LayerNorm(bottleneck_dim),
+            nn.GELU(),
+        )
+        self.image_bottleneck = nn.Sequential(
+            nn.Linear(embedding_dim, bottleneck_dim),
+            nn.LayerNorm(bottleneck_dim),
+            nn.GELU(),
+        )
+        
         # Text-to-image projection: converts text embeddings → image embedding space
         self.text_projection = nn.Sequential(
-            nn.Linear(embedding_dim, embedding_dim * 2),
+            nn.Linear(bottleneck_dim, embedding_dim * 2),
             nn.ReLU(),
             nn.Dropout(0.1),
             nn.Linear(embedding_dim * 2, embedding_dim * 3),  # 3x for (what, action, result)
@@ -34,13 +48,20 @@ class InputTokenizer(nn.Module):
         
         # Image decomposition: splits images into triplet components
         self.image_decomposer = nn.Sequential(
-            nn.Linear(embedding_dim, embedding_dim * 2),
+            nn.Linear(bottleneck_dim, embedding_dim * 2),
             nn.ReLU(),
             nn.Linear(embedding_dim * 2, embedding_dim * 3),  # 3x for (what, action, result)
         )
         
         # Learned role embeddings for (what, action, result)
         self.role_embeddings = nn.Parameter(torch.randn(3, embedding_dim))
+        
+        # Noise robustness layers
+        self.embedding_dropout = nn.Dropout(0.15)
+        self.token_mask_prob = 0.1  # Random token masking probability
+        
+        # Contrastive alignment temperature (learnable)
+        self.temperature = nn.Parameter(torch.tensor(0.07))
         
     def forward(
         self,
@@ -52,30 +73,48 @@ class InputTokenizer(nn.Module):
         
         Args:
             text_embedding: (B, embedding_dim) - text prompt embeddings
-            image_embeddings: (B, N, embedding_dim) - image feature embeddings
+            image_embeddings: (B, N, embedding_dim) - image features
             
         Returns:
             Tuple of (what, action, result) tensors, each (B, embedding_dim)
         """
         if text_embedding is not None:
-            # Text → image triplets
-            projected = self.text_projection(text_embedding)  # (B, embedding_dim * 3)
+            # Apply noise augmentation during training
+            if self.training:
+                text_embedding = self.embedding_dropout(text_embedding)
+                # Random token masking
+                mask = torch.rand(text_embedding.shape[0], 1) > self.token_mask_prob
+                mask = mask.to(text_embedding.device)
+                text_embedding = text_embedding * mask
+            
+            # Text → bottleneck → triplets
+            bottleneck = self.text_bottleneck(text_embedding)
+            projected = self.text_projection(bottleneck)
             B = text_embedding.shape[0]
-            triplet = projected.view(B, 3, self.embedding_dim)  # (B, 3, embedding_dim)
+            triplet = projected.view(B, 3, self.embedding_dim)
             
         elif image_embeddings is not None:
             # Images → image triplets
             B, N, D = image_embeddings.shape
             # Average pool multiple images
             pooled = image_embeddings.mean(dim=1)  # (B, embedding_dim)
-            decomposed = self.image_decomposer(pooled)  # (B, embedding_dim * 3)
-            triplet = decomposed.view(B, 3, self.embedding_dim)  # (B, 3, embedding_dim)
+            
+            # Apply noise augmentation during training
+            if self.training:
+                pooled = self.embedding_dropout(pooled)
+            
+            # Image → bottleneck → triplets
+            bottleneck = self.image_bottleneck(pooled)
+            decomposed = self.image_decomposer(bottleneck)
+            triplet = decomposed.view(B, 3, self.embedding_dim)
             
         else:
-            raise ValueError("Must provide either text_embedding or image_embeddings")
+            raise ValueError(
+                "Must provide either text_embedding or image_embeddings"
+            )
         
         # Add role embeddings
-        triplet = triplet + self.role_embeddings.unsqueeze(0)  # (B, 3, embedding_dim)
+        triplet = triplet + self.role_embeddings.unsqueeze(0)
         
         # Split into (what, action, result)
         what = triplet[:, 0, :]  # (B, embedding_dim)
@@ -83,33 +122,126 @@ class InputTokenizer(nn.Module):
         result = triplet[:, 2, :]  # (B, embedding_dim)
         
         return what, action, result
+    
+    def contrastive_loss(
+        self,
+        text_embedding: torch.Tensor,
+        image_embeddings: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Compute CLIP-style contrastive alignment loss.
+        
+        Args:
+            text_embedding: (B, embedding_dim)
+            image_embeddings: (B, N, embedding_dim)
+            
+        Returns:
+            Contrastive loss scalar
+        """
+        B = text_embedding.shape[0]
+        
+        # Project to shared bottleneck space
+        text_bottleneck = self.text_bottleneck(text_embedding)  # (B, D/2)
+        image_pooled = image_embeddings.mean(dim=1)  # (B, D)
+        image_bottleneck = self.image_bottleneck(image_pooled)  # (B, D/2)
+        
+        # Normalize embeddings
+        text_features = F.normalize(text_bottleneck, dim=-1)
+        image_features = F.normalize(image_bottleneck, dim=-1)
+        
+        # Compute similarity matrix
+        logits = torch.matmul(text_features, image_features.t()) / self.temperature
+        
+        # Symmetric cross-entropy loss
+        labels = torch.arange(B, device=logits.device)
+        loss_text_to_image = F.cross_entropy(logits, labels)
+        loss_image_to_text = F.cross_entropy(logits.t(), labels)
+        
+        return (loss_text_to_image + loss_image_to_text) / 2.0
+
+
+class TransformerExpertBlock(nn.Module):
+    """
+    Single Transformer encoder block for expert dream generation.
+    Uses pre-norm architecture for stability.
+    """
+    
+    def __init__(self, embedding_dim: int, num_heads: int = 8, ff_dim: int = 2048):
+        super().__init__()
+        self.embedding_dim = embedding_dim
+        
+        # Pre-LayerNorm multi-head attention
+        self.attn_norm = nn.LayerNorm(embedding_dim)
+        self.self_attn = nn.MultiheadAttention(
+            embedding_dim, num_heads, dropout=0.1, batch_first=True
+        )
+        
+        # Pre-LayerNorm feedforward
+        self.ff_norm = nn.LayerNorm(embedding_dim)
+        self.feedforward = nn.Sequential(
+            nn.Linear(embedding_dim, ff_dim),
+            nn.GELU(),
+            nn.Dropout(0.1),
+            nn.Linear(ff_dim, embedding_dim),
+            nn.Dropout(0.1),
+        )
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: (B, seq_len, embedding_dim)
+        Returns:
+            x: (B, seq_len, embedding_dim)
+        """
+        # Pre-norm self-attention with residual
+        attn_out, _ = self.self_attn(
+            self.attn_norm(x), self.attn_norm(x), self.attn_norm(x)
+        )
+        x = x + attn_out
+        
+        # Pre-norm feedforward with residual
+        x = x + self.feedforward(self.ff_norm(x))
+        
+        return x
 
 
 class DreamSequence(nn.Module):
     """
-    Generates a single dream sequence: a chain of image triplets representing a reasoning path.
+    Generates a single dream sequence using Transformer encoder blocks.
     
-    Each step transforms (what_t, action_t, result_t) → (what_{t+1}, action_{t+1}, result_{t+1})
+    Each step transforms (what_t, action_t, result_t) →
+    (what_{t+1}, action_{t+1}, result_{t+1})
+    Improved: Uses Transformer blocks instead of GRU for better capacity.
     """
     
-    def __init__(self, embedding_dim: int = 512):
+    def __init__(
+        self,
+        embedding_dim: int = 512,
+        num_layers: int = 2,
+        num_heads: int = 8,
+    ):
         super().__init__()
         self.embedding_dim = embedding_dim
+        self.num_layers = num_layers
         
-        # Recurrent dream generator: predicts next triplet from current state
-        self.dream_gru = nn.GRU(
-            input_size=embedding_dim * 3,  # (what, action, result) concatenated
-            hidden_size=embedding_dim * 2,
-            num_layers=2,
-            batch_first=True,
-        )
+        # Positional encoding for sequence steps
+        self.pos_embedding = nn.Parameter(torch.randn(1, 10, embedding_dim))
         
-        # Project GRU hidden state → next triplet
+        # Transformer encoder blocks
+        self.transformer_blocks = nn.ModuleList([
+            TransformerExpertBlock(
+                embedding_dim, num_heads, ff_dim=embedding_dim * 4
+            )
+            for _ in range(num_layers)
+        ])
+        
+        # Project triplet → next triplet
         self.triplet_projector = nn.Sequential(
-            nn.Linear(embedding_dim * 2, embedding_dim * 4),
-            nn.ReLU(),
+            nn.LayerNorm(embedding_dim),
+            nn.Linear(embedding_dim, embedding_dim * 2),
+            nn.GELU(),
             nn.Dropout(0.1),
-            nn.Linear(embedding_dim * 4, embedding_dim * 3),
+            nn.Linear(embedding_dim * 2, embedding_dim * 3),
         )
         
     def forward(
@@ -121,7 +253,7 @@ class DreamSequence(nn.Module):
         Generate a dream sequence starting from initial triplet.
         
         Args:
-            initial_triplet: (B, 3, embedding_dim) - (what, action, result)
+            initial_triplet: (B, 3, embedding_dim)
             num_steps: Number of reasoning steps to dream
             
         Returns:
@@ -130,60 +262,138 @@ class DreamSequence(nn.Module):
         B = initial_triplet.shape[0]
         device = initial_triplet.device
         
-        # Initialize hidden state
-        hidden = torch.zeros(2, B, self.embedding_dim * 2, device=device)
+        # Average triplet components to get initial embedding
+        # (B, 3, D) -> (B, D)
+        current_emb = initial_triplet.mean(dim=1)
         
-        # Flatten triplet for GRU input
-        current = initial_triplet.view(B, 1, self.embedding_dim * 3)  # (B, 1, D*3)
+        # Build sequence by autoregressively generating steps
+        sequence = [current_emb]
         
+        for step in range(num_steps):
+            # Stack current sequence: (B, seq_len, D)
+            seq_tensor = torch.stack(sequence, dim=1)
+            
+            # Add positional embeddings
+            seq_len = seq_tensor.shape[1]
+            pos_emb = self.pos_embedding[:, :seq_len, :]
+            seq_tensor = seq_tensor + pos_emb
+            
+            # Apply Transformer blocks
+            for block in self.transformer_blocks:
+                seq_tensor = block(seq_tensor)
+            
+            # Take last position and project to next triplet
+            last_hidden = seq_tensor[:, -1, :]
+            next_emb = self.triplet_projector(last_hidden)  # (B, D*3)
+            next_emb = next_emb.view(B, 3, self.embedding_dim)
+            next_emb = next_emb.mean(dim=1)  # (B, D)
+            
+            sequence.append(next_emb)
+        
+        # Convert sequence to triplets
         dream_sequence = []
-        
-        for _ in range(num_steps):
-            # Generate next state
-            output, hidden = self.dream_gru(current, hidden)  # output: (B, 1, D*2)
+        for step_emb in sequence[1:]:  # Skip initial
+            # Project embedding to triplet components
+            triplet_flat = self.triplet_projector(step_emb)  # (B, D*3)
+            triplet = triplet_flat.view(B, 3, self.embedding_dim)
             
-            # Project to next triplet
-            next_triplet_flat = self.triplet_projector(output.squeeze(1))  # (B, D*3)
-            next_triplet = next_triplet_flat.view(B, 3, self.embedding_dim)  # (B, 3, D)
-            
-            # Extract components
-            what = next_triplet[:, 0, :]
-            action = next_triplet[:, 1, :]
-            result = next_triplet[:, 2, :]
+            what = triplet[:, 0, :]
+            action = triplet[:, 1, :]
+            result = triplet[:, 2, :]
             
             dream_sequence.append((what, action, result))
-            
-            # Update current for next iteration
-            current = next_triplet_flat.unsqueeze(1)  # (B, 1, D*3)
         
         return dream_sequence
 
 
 class MoEDreamGating(nn.Module):
-    """Gating network for MoE dream expert selection."""
+    """
+    Noisy Top-K gating network for MoE dream expert selection.
+    Implements Switch Transformer style routing with load balancing.
+    """
     
-    def __init__(self, embedding_dim: int, num_experts: int):
+    def __init__(
+        self,
+        embedding_dim: int,
+        num_experts: int,
+        top_k: int = 2,
+        noise_std: float = 0.1,
+    ):
         super().__init__()
+        self.num_experts = num_experts
+        self.top_k = min(top_k, num_experts)
+        self.noise_std = noise_std
+        
         self.gate = nn.Sequential(
             nn.Linear(embedding_dim * 3, embedding_dim),
-            nn.ReLU(),
+            nn.LayerNorm(embedding_dim),
+            nn.GELU(),
+            nn.Dropout(0.1),
             nn.Linear(embedding_dim, num_experts)
         )
+        
+        # Noise projection for tunable noise
+        self.noise_gate = nn.Linear(embedding_dim * 3, num_experts)
+        
+        # Load balancing importance weights (learnable)
+        self.expert_importance = nn.Parameter(torch.ones(num_experts))
     
-    def forward(self, triplet: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        triplet: torch.Tensor,
+        return_load_loss: bool = False,
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
-        Compute expert weights.
+        Compute expert weights with noisy top-k gating.
         
         Args:
             triplet: (B, 3, embedding_dim) - initial triplet
+            return_load_loss: If True, also return load balancing loss
             
         Returns:
-            weights: (B, num_experts) - softmax expert weights
+            weights: (B, num_experts) - sparse top-k expert weights
+            load_loss (optional): Load balancing auxiliary loss
         """
         B = triplet.shape[0]
         flat = triplet.view(B, -1)  # (B, 3*D)
-        logits = self.gate(flat)  # (B, num_experts)
-        return torch.softmax(logits, dim=-1)
+        
+        # Clean gating logits
+        clean_logits = self.gate(flat)  # (B, num_experts)
+        
+        # Add tunable noise during training
+        if self.training:
+            noise = torch.randn_like(clean_logits)
+            noise_scale = F.softplus(self.noise_gate(flat))
+            noisy_logits = clean_logits + noise * noise_scale * self.noise_std
+        else:
+            noisy_logits = clean_logits
+        
+        # Top-k selection
+        top_k_logits, top_k_indices = torch.topk(
+            noisy_logits, self.top_k, dim=-1
+        )
+        
+        # Sparse gating: only top-k experts get non-zero weight
+        top_k_gates = F.softmax(top_k_logits, dim=-1)
+        
+        # Create sparse weight matrix
+        weights = torch.zeros_like(noisy_logits)
+        weights.scatter_(1, top_k_indices, top_k_gates)
+        
+        if return_load_loss:
+            # Load balancing loss: encourage uniform expert usage
+            # Importance: fraction of batch routed to each expert
+            importance = weights.sum(dim=0) / B
+            
+            # Load: average gate value for each expert
+            load = F.softmax(clean_logits, dim=-1).mean(dim=0)
+            
+            # CV squared: coefficient of variation loss
+            load_loss = self.num_experts * (importance * load).sum()
+            
+            return weights, load_loss
+        
+        return weights
 
 
 class DreamGenerator(nn.Module):
@@ -214,6 +424,12 @@ class DreamGenerator(nn.Module):
         self.dream_experts = nn.ModuleList([
             DreamSequence(embedding_dim) for _ in range(num_experts)
         ])
+        
+        # Cross-expert attention for integration
+        self.cross_expert_attn = nn.MultiheadAttention(
+            embedding_dim, num_heads=8, dropout=0.1, batch_first=True
+        )
+        self.cross_expert_norm = nn.LayerNorm(embedding_dim)
         
         # Gating network selects which experts to use
         self.expert_gate = MoEDreamGating(embedding_dim, num_experts)
@@ -247,8 +463,11 @@ class DreamGenerator(nn.Module):
             [initial_what, initial_action, initial_result], dim=1
         )  # (B, 3, embedding_dim)
         
-        # Compute expert weights via gating network
-        expert_weights = self.expert_gate(initial_triplet)  # (B, num_experts)
+        # Compute expert weights via gating with load balancing
+        expert_weights, load_loss = self.expert_gate(
+            initial_triplet, return_load_loss=True
+        )
+        self.last_load_loss = load_loss.detach() if load_loss is not None else None  # Detach to avoid graph retention
         
         all_dreams = []
         

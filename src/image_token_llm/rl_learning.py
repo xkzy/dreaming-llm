@@ -15,32 +15,59 @@ from .vision_encoder import TripletEncoder
 
 class RewardModel(nn.Module):
     """
-    Reward model for evaluating reasoning trajectories.
-    Learns to score (what, action, result) triplets based on correctness.
+    Multi-component reward model for evaluating reasoning trajectories.
+    Evaluates: faithfulness, coherence, correctness, and creativity.
     """
 
     def __init__(self, embedding_dim: int = 512, hidden_dim: int = 256) -> None:
         super().__init__()
         self.embedding_dim = embedding_dim
         
-        # Multi-head reward prediction
-        self.reward_net = nn.Sequential(
+        # Shared feature extractor
+        self.feature_extractor = nn.Sequential(
             nn.Linear(embedding_dim * 3, hidden_dim),
             nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(0.1),
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.LayerNorm(hidden_dim // 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 2, 1),
-            nn.Sigmoid(),  # Reward in [0, 1]
         )
+        
+        # Component-specific reward heads
+        self.faithfulness_head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.GELU(),
+            nn.Linear(hidden_dim // 2, 1),
+            nn.Sigmoid(),
+        )
+        
+        self.coherence_head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.GELU(),
+            nn.Linear(hidden_dim // 2, 1),
+            nn.Sigmoid(),
+        )
+        
+        self.correctness_head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.GELU(),
+            nn.Linear(hidden_dim // 2, 1),
+            nn.Sigmoid(),
+        )
+        
+        self.creativity_head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.GELU(),
+            nn.Linear(hidden_dim // 2, 1),
+            nn.Sigmoid(),
+        )
+        
+        # Learned component weights
+        self.component_weights = nn.Parameter(torch.ones(4))
         
         # Confidence estimator
         self.confidence_net = nn.Sequential(
-            nn.Linear(embedding_dim * 3, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 1),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.GELU(),
+            nn.Linear(hidden_dim // 2, 1),
             nn.Sigmoid(),
         )
 
@@ -49,9 +76,9 @@ class RewardModel(nn.Module):
         what_emb: torch.Tensor,
         action_emb: torch.Tensor,
         result_emb: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
         """
-        Compute reward and confidence for a triplet.
+        Compute multi-component reward and confidence for a triplet.
         
         Args:
             what_emb: [B, D]
@@ -59,13 +86,38 @@ class RewardModel(nn.Module):
             result_emb: [B, D]
         
         Returns:
-            reward: [B, 1] - Predicted reward
+            total_reward: [B, 1] - Weighted sum of all components
             confidence: [B, 1] - Confidence score
+            components: Dict of individual reward components
         """
         combined = torch.cat([what_emb, action_emb, result_emb], dim=-1)
-        reward = self.reward_net(combined)
-        confidence = self.confidence_net(combined)
-        return reward, confidence
+        features = self.feature_extractor(combined)
+        
+        # Compute individual reward components
+        faithfulness = self.faithfulness_head(features)
+        coherence = self.coherence_head(features)
+        correctness = self.correctness_head(features)
+        creativity = self.creativity_head(features)
+        
+        # Weighted sum with learned weights
+        weights = F.softmax(self.component_weights, dim=0)
+        total_reward = (
+            weights[0] * faithfulness +
+            weights[1] * coherence +
+            weights[2] * correctness +
+            weights[3] * creativity
+        )
+        
+        confidence = self.confidence_net(features)
+        
+        components = {
+            'faithfulness': faithfulness,
+            'coherence': coherence,
+            'correctness': correctness,
+            'creativity': creativity,
+        }
+        
+        return total_reward, confidence, components
 
 
 class PolicyNetwork(nn.Module):
@@ -486,3 +538,183 @@ class RLContinuousLearner(nn.Module):
         self.reward_optimizer.zero_grad()
         total_loss.backward()
         self.reward_optimizer.step()
+
+
+class PPOTrainer(nn.Module):
+    """
+    Proximal Policy Optimization (PPO) trainer for more stable RL.
+    Implements clipped surrogate objective with value function.
+    """
+
+    def __init__(
+        self,
+        policy_network: PolicyNetwork,
+        value_network: nn.Module,
+        reward_model: RewardModel,
+        learning_rate: float = 3e-4,
+        clip_epsilon: float = 0.2,
+        gamma: float = 0.99,
+        lam: float = 0.95,  # GAE lambda
+        vf_coef: float = 0.5,
+        entropy_coef: float = 0.01,
+        max_grad_norm: float = 0.5,
+    ) -> None:
+        super().__init__()
+        self.policy_network = policy_network
+        self.value_network = value_network
+        self.reward_model = reward_model
+        
+        self.clip_epsilon = clip_epsilon
+        self.gamma = gamma
+        self.lam = lam
+        self.vf_coef = vf_coef
+        self.entropy_coef = entropy_coef
+        self.max_grad_norm = max_grad_norm
+        
+        # Single optimizer for both policy and value
+        self.optimizer = torch.optim.AdamW(
+            list(policy_network.parameters()) +
+            list(value_network.parameters()),
+            lr=learning_rate
+        )
+    
+    def compute_gae(
+        self,
+        rewards: torch.Tensor,
+        values: torch.Tensor,
+        dones: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute Generalized Advantage Estimation (GAE).
+        
+        Args:
+            rewards: [T] - Rewards for each timestep
+            values: [T+1] - Value estimates (includes bootstrap value)
+            dones: [T] - Done flags
+            
+        Returns:
+            advantages: [T] - GAE advantages
+            returns: [T] - Discounted returns
+        """
+        T = rewards.shape[0]
+        advantages = torch.zeros(T, device=rewards.device)
+        
+        gae = 0.0
+        for t in reversed(range(T)):
+            delta = rewards[t] + self.gamma * values[t + 1] * (1 - dones[t]) - values[t]
+            gae = delta + self.gamma * self.lam * (1 - dones[t]) * gae
+            advantages[t] = gae
+        
+        returns = advantages + values[:-1]
+        return advantages, returns
+    
+    def ppo_update(
+        self,
+        states: torch.Tensor,
+        actions: torch.Tensor,
+        old_log_probs: torch.Tensor,
+        advantages: torch.Tensor,
+        returns: torch.Tensor,
+        neighbor_embs: torch.Tensor,
+        masks: torch.Tensor,
+        num_epochs: int = 4,
+        batch_size: int = 64,
+    ) -> Dict[str, float]:
+        """
+        Perform PPO update with multiple epochs over the data.
+        
+        Args:
+            states: [T, D] - State embeddings
+            actions: [T] - Action indices
+            old_log_probs: [T] - Log probs from old policy
+            advantages: [T] - GAE advantages
+            returns: [T] - Target returns
+            neighbor_embs: [T, N, D] - Neighbor embeddings
+            masks: [T, N] - Valid neighbor masks
+            num_epochs: Number of update epochs
+            batch_size: Mini-batch size
+            
+        Returns:
+            Training metrics
+        """
+        T = states.shape[0]
+        indices = torch.arange(T)
+        
+        metrics = {
+            'policy_loss': 0.0,
+            'value_loss': 0.0,
+            'entropy': 0.0,
+            'clip_fraction': 0.0,
+        }
+        num_updates = 0
+        
+        for epoch in range(num_epochs):
+            # Shuffle indices
+            perm = torch.randperm(T, device=states.device)
+            
+            for start in range(0, T, batch_size):
+                end = min(start + batch_size, T)
+                batch_idx = perm[start:end]
+                
+                # Get batch
+                batch_states = states[batch_idx]
+                batch_actions = actions[batch_idx]
+                batch_old_log_probs = old_log_probs[batch_idx]
+                batch_advantages = advantages[batch_idx]
+                batch_returns = returns[batch_idx]
+                batch_neighbors = neighbor_embs[batch_idx]
+                batch_masks = masks[batch_idx]
+                
+                # Forward pass
+                action_probs, new_values = self.policy_network(
+                    batch_states, batch_neighbors, batch_masks
+                )
+                
+                # Compute new log probs
+                dist = Categorical(action_probs)
+                new_log_probs = dist.log_prob(batch_actions)
+                entropy = dist.entropy().mean()
+                
+                # PPO clipped surrogate objective
+                ratio = torch.exp(new_log_probs - batch_old_log_probs)
+                surr1 = ratio * batch_advantages
+                surr2 = torch.clamp(
+                    ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon
+                ) * batch_advantages
+                policy_loss = -torch.min(surr1, surr2).mean()
+                
+                # Value loss (clipped)
+                value_pred = new_values.squeeze(-1)
+                value_loss = F.mse_loss(value_pred, batch_returns)
+                
+                # Total loss
+                loss = (
+                    policy_loss +
+                    self.vf_coef * value_loss -
+                    self.entropy_coef * entropy
+                )
+                
+                # Update
+                self.optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(
+                    list(self.policy_network.parameters()) +
+                    list(self.value_network.parameters()),
+                    self.max_grad_norm
+                )
+                self.optimizer.step()
+                
+                # Track metrics
+                metrics['policy_loss'] += policy_loss.item()
+                metrics['value_loss'] += value_loss.item()
+                metrics['entropy'] += entropy.item()
+                with torch.no_grad():
+                    clip_fraction = (torch.abs(ratio - 1.0) > self.clip_epsilon).float().mean()
+                    metrics['clip_fraction'] += clip_fraction.item()
+                num_updates += 1
+        
+        # Average metrics
+        for key in metrics:
+            metrics[key] /= num_updates
+        
+        return metrics

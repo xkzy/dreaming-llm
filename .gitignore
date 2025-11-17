@@ -14,20 +14,57 @@ dist/
 .DS_Store
 .cache/
 
-# Datasets
-data/coco/
-data/*.jpg
-data/*.jpeg
-data/*.png
-data/*.zip
-data/*.tar
-data/*.tar.gz
+# VS Code
+.vscode/
 
-# Large model files
-models/*.pt
-models/*.pth
+# Mac
+.DS_Store
+
+# Linux
+*~
+
+# Logs
+*.log
+
+# Data
+*.zip
+*.tar.gz
+*.tar
+*.h5
+*.pth
+*.pt
 *.ckpt
+*.npz
+*.npy
+*.pkl
+*.db
+*.sqlite
+*.onnx
+*.bin
+*.cache
 
-# Keep small fixtures
-!data/fixtures/
-!data/sample*.jpg
+# Model artifacts
+pretrained/
+pretrained_enhanced/
+pretrained_llama3/
+models/
+
+# Ignore local data
+/data/
+!/data/README.md
+
+# Ignore notebooks output
+notebooks/__pycache__/
+notebooks/*.ipynb_checkpoints
+
+# Ignore test cache
+tests/__pycache__/
+
+# Ignore scripts cache
+scripts/__pycache__/
+
+# Ignore environment
+.venv/
+venv/
+ENV/
+env/

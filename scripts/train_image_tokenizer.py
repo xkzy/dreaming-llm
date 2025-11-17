@@ -28,7 +28,8 @@ from tqdm import tqdm
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from image_token_llm.vision_encoder import VisionEncoder
+from image_token_llm.vision_encoder import VisionEncoder, ImageTokenizerV2
+from image_token_llm.config import ImageTokenizerConfig
 
 logging.basicConfig(
     level=logging.INFO,
@@ -140,12 +141,13 @@ class ImageTokenizerTrainer:
                 action = images_triplets[:, 1, :, :, :]
                 result = images_triplets[:, 2, :, :, :]
 
-                # Encode
-                embeddings = self.encoder.encode_triplet(
-                    what=what,
-                    action=action,
-                    result=result,
-                )
+                # Encode triplet(s) -> support different encoder interfaces
+                out = self.encoder(what, action, result)
+                # Some encoders return (fused_embedding, components)
+                if isinstance(out, tuple):
+                    embeddings = out[0]
+                else:
+                    embeddings = out
 
                 # Decode
                 reconstructed = self.decoder(embeddings)
@@ -272,7 +274,12 @@ def train_image_tokenizer(
     
     # Create encoder
     logger.info("Initializing vision encoder...")
-    encoder = VisionEncoder(backbone=backbone)
+    # Build config for the vision encoder
+    encoder_config = ImageTokenizerConfig()
+    # Use the triplet-aware tokenizer wrapper (V2) which accepts triplets
+    encoder = ImageTokenizerV2(encoder_config, backbone=backbone)
+    # Keep a name attribute expected by the trainer/save routine
+    encoder.backbone_name = backbone
     
     # Create trainer
     trainer = ImageTokenizerTrainer(

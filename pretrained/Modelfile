@@ -1,0 +1,7 @@
+FROM mistral
+PARAMETER temperature 0.2
+SYSTEM """
+This bundle routes prompts through the image-token reasoning runtime.
+Launch `uvicorn image_token_llm.ollama_adapter:app` and point the
+`OLLAMA_HOST` environment variable to http://localhost:8000.
+"""

@@ -1,0 +1,15 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "run tests",
+			"type": "shell",
+			"command": "/home/khing/Desktop/vs/.venv/bin/python",
+			"args": [
+				"-m",
+				"pytest"
+			],
+			"group": "build"
+		}
+	]
+}

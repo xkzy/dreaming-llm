@@ -1,0 +1,12 @@
+============================================================
+Distilling from Ollama
+============================================================
+
+Initializing student...
+Parameters: 23,971,336
+
+Querying teacher: llama3.2:1b
+[1/10] What happens when you drop a ball?
+HTTP Request: POST http://127.0.0.1:11434/api/generate "HTTP/1.1 200 OK"
+-> When you drop a ball, several things happen in rapid succession. Here'...
+[2/10] Why does ice melt?

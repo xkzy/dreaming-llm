@@ -1,0 +1,271 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1600">
+  <!-- Title -->
+  <text x="700" y="30" font-size="24" font-weight="bold" text-anchor="middle" fill="#2c3e50">
+    Dreaming-Based Reasoning LLM Architecture
+  </text>
+  
+  <!-- Input Layer -->
+  <rect x="50" y="70" width="250" height="120" fill="#3498db" opacity="0.2" stroke="#3498db" stroke-width="2" rx="10"/>
+  <text x="175" y="95" font-size="16" font-weight="bold" text-anchor="middle" fill="#2c3e50">Input Layer</text>
+  <text x="175" y="120" font-size="13" text-anchor="middle" fill="#34495e">Text Prompt</text>
+  <text x="175" y="140" font-size="12" text-anchor="middle" fill="#7f8c8d">"What happens when..."</text>
+  <text x="175" y="165" font-size="13" text-anchor="middle" fill="#34495e">OR Images (single/multiple)</text>
+  
+  <!-- Input Tokenizer (detailed) -->
+  <rect x="50" y="220" width="250" height="130" fill="#e67e22" opacity="0.2" stroke="#e67e22" stroke-width="2" rx="10"/>
+  <text x="175" y="245" font-size="16" font-weight="bold" text-anchor="middle" fill="#2c3e50">Input Tokenizer</text>
+  <text x="175" y="265" font-size="12" text-anchor="middle" fill="#7f8c8d">Text → Patch Embeddings</text>
+  <text x="175" y="280" font-size="12" text-anchor="middle" fill="#7f8c8d">Image → Visual Patches</text>
+  <g>
+    <rect x="70" y="295" width="210" height="22" fill="#fff" stroke="#e67e22" stroke-width="1" rx="6"/>
+    <text x="175" y="310" font-size="11" text-anchor="middle" fill="#d35400">Patchify + Linear Projection (CLIP/ResNet)</text>
+  </g>
+  <g>
+    <rect x="70" y="320" width="210" height="22" fill="#fff" stroke="#e67e22" stroke-width="1" rx="6"/>
+    <text x="175" y="335" font-size="11" text-anchor="middle" fill="#d35400">Token Embedding + Role Embedding</text>
+  </g>
+  <g>
+    <rect x="70" y="345" width="210" height="22" fill="#fff" stroke="#e67e22" stroke-width="1" rx="6"/>
+    <text x="175" y="360" font-size="11" text-anchor="middle" fill="#d35400">→ Image Triplets: (what, action, result)</text>
+  </g>
+  
+  <!-- Arrow to dreams -->
+  <line x1="175" y1="320" x2="175" y2="370" stroke="#2c3e50" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="185" y="350" font-size="11" fill="#16a085">(B, 3, 512-dim)</text>
+  
+  <!-- Dream Generation Layer with MoE and RL -->
+  <rect x="50" y="380" width="1300" height="450" fill="#9b59b6" opacity="0.1" stroke="#9b59b6" stroke-width="3" rx="10"/>
+  <text x="700" y="405" font-size="18" font-weight="bold" text-anchor="middle" fill="#8e44ad">THINKING PHASE: Dreaming in Image Space</text>
+  <!-- MoE Gating -->
+  <g transform="translate(420, 420)">
+    <rect x="0" y="0" width="220" height="60" fill="#fff" stroke="#8e44ad" stroke-width="2" rx="8"/>
+    <text x="110" y="20" font-size="14" font-weight="bold" text-anchor="middle" fill="#8e44ad">MoE Gating Network</text>
+    <text x="110" y="40" font-size="11" text-anchor="middle" fill="#7f8c8d">Selects expert for each step</text>
+    <text x="110" y="55" font-size="10" text-anchor="middle" fill="#7f8c8d">[spatial | temporal | causal | abstract]</text>
+  </g>
+  <!-- RL Policy/Reward -->
+  <g transform="translate(700, 420)">
+    <rect x="0" y="0" width="220" height="60" fill="#fff" stroke="#16a085" stroke-width="2" rx="8"/>
+  <text x="110" y="20" font-size="14" font-weight="bold" text-anchor="middle" fill="#16a085">RL Policy &amp; Reward</text>
+    <text x="110" y="40" font-size="11" text-anchor="middle" fill="#7f8c8d">Guides dream exploration</text>
+    <text x="110" y="55" font-size="10" text-anchor="middle" fill="#7f8c8d">(PolicyNet, RewardModel)</text>
+  </g>
+  <!-- Ollama Distillation Arrow -->
+  <g>
+    <line x1="1350" y1="200" x2="1100" y2="420" stroke="#e67e22" stroke-width="3" marker-end="url(#arrowhead)"/>
+    <rect x="1320" y="140" width="110" height="60" fill="#fffbe6" stroke="#e67e22" stroke-width="2" rx="8"/>
+    <text x="1375" y="165" font-size="13" font-weight="bold" text-anchor="middle" fill="#e67e22">Ollama</text>
+    <text x="1375" y="185" font-size="11" text-anchor="middle" fill="#7f8c8d">Distillation</text>
+  </g>
+  
+  <!-- Dream Sequence 1 -->
+  <g transform="translate(100, 430)">
+    <rect x="0" y="0" width="280" height="80" fill="#9b59b6" opacity="0.2" stroke="#9b59b6" stroke-width="2" rx="5"/>
+    <text x="140" y="20" font-size="14" font-weight="bold" text-anchor="middle" fill="#8e44ad">Dream Sequence 1</text>
+    <circle cx="40" cy="50" r="15" fill="#c39bd3"/>
+    <text x="40" y="55" font-size="10" text-anchor="middle" fill="#fff">T0</text>
+    <line x1="55" y1="50" x2="85" y2="50" stroke="#8e44ad" stroke-width="2" marker-end="url(#arrowhead-purple)"/>
+    <circle cx="100" cy="50" r="15" fill="#c39bd3"/>
+    <text x="100" y="55" font-size="10" text-anchor="middle" fill="#fff">T1</text>
+    <line x1="115" y1="50" x2="145" y2="50" stroke="#8e44ad" stroke-width="2" marker-end="url(#arrowhead-purple)"/>
+    <circle cx="160" cy="50" r="15" fill="#c39bd3"/>
+    <text x="160" y="55" font-size="10" text-anchor="middle" fill="#fff">T2</text>
+    <line x1="175" y1="50" x2="205" y2="50" stroke="#8e44ad" stroke-width="2" marker-end="url(#arrowhead-purple)"/>
+    <circle cx="220" cy="50" r="15" fill="#c39bd3"/>
+    <text x="220" y="55" font-size="10" text-anchor="middle" fill="#fff">T3</text>
+    <line x1="235" y1="50" x2="250" y2="50" stroke="#8e44ad" stroke-width="2" marker-end="url(#arrowhead-purple)"/>
+    <circle cx="260" cy="50" r="15" fill="#c39bd3"/>
+    <text x="260" y="55" font-size="10" text-anchor="middle" fill="#fff">T4</text>
+  </g>
+  
+  <!-- Dream Sequence 2 -->
+  <g transform="translate(100, 540)">
+    <rect x="0" y="0" width="280" height="80" fill="#9b59b6" opacity="0.2" stroke="#9b59b6" stroke-width="2" rx="5"/>
+    <text x="140" y="20" font-size="14" font-weight="bold" text-anchor="middle" fill="#8e44ad">Dream Sequence 2</text>
+    <circle cx="40" cy="50" r="15" fill="#c39bd3"/>
+    <text x="40" y="55" font-size="10" text-anchor="middle" fill="#fff">T0</text>
+    <line x1="55" y1="50" x2="85" y2="50" stroke="#8e44ad" stroke-width="2" marker-end="url(#arrowhead-purple)"/>
+    <circle cx="100" cy="50" r="15" fill="#c39bd3"/>
+    <text x="100" y="55" font-size="10" text-anchor="middle" fill="#fff">T1</text>
+    <line x1="115" y1="50" x2="145" y2="50" stroke="#8e44ad" stroke-width="2" marker-end="url(#arrowhead-purple)"/>
+    <circle cx="160" cy="50" r="15" fill="#c39bd3"/>
+    <text x="160" y="55" font-size="10" text-anchor="middle" fill="#fff">T2</text>
+    <line x1="175" y1="50" x2="205" y2="50" stroke="#8e44ad" stroke-width="2" marker-end="url(#arrowhead-purple)"/>
+    <circle cx="220" cy="50" r="15" fill="#c39bd3"/>
+    <text x="220" y="55" font-size="10" text-anchor="middle" fill="#fff">T3</text>
+    <line x1="235" y1="50" x2="250" y2="50" stroke="#8e44ad" stroke-width="2" marker-end="url(#arrowhead-purple)"/>
+    <circle cx="260" cy="50" r="15" fill="#c39bd3"/>
+    <text x="260" y="55" font-size="10" text-anchor="middle" fill="#fff">T4</text>
+  </g>
+  
+  <!-- Dream Sequence 3 -->
+  <g transform="translate(100, 650)">
+    <rect x="0" y="0" width="280" height="80" fill="#9b59b6" opacity="0.2" stroke="#9b59b6" stroke-width="2" rx="5"/>
+    <text x="140" y="20" font-size="14" font-weight="bold" text-anchor="middle" fill="#8e44ad">Dream Sequence 3</text>
+    <circle cx="40" cy="50" r="15" fill="#c39bd3"/>
+    <text x="40" y="55" font-size="10" text-anchor="middle" fill="#fff">T0</text>
+    <line x1="55" y1="50" x2="85" y2="50" stroke="#8e44ad" stroke-width="2" marker-end="url(#arrowhead-purple)"/>
+    <circle cx="100" cy="50" r="15" fill="#c39bd3"/>
+    <text x="100" y="55" font-size="10" text-anchor="middle" fill="#fff">T1</text>
+    <line x1="115" y1="50" x2="145" y2="50" stroke="#8e44ad" stroke-width="2" marker-end="url(#arrowhead-purple)"/>
+    <circle cx="160" cy="50" r="15" fill="#c39bd3"/>
+    <text x="160" y="55" font-size="10" text-anchor="middle" fill="#fff">T2</text>
+    <line x1="175" y1="50" x2="205" y2="50" stroke="#8e44ad" stroke-width="2" marker-end="url(#arrowhead-purple)"/>
+    <circle cx="220" cy="50" r="15" fill="#c39bd3"/>
+    <text x="220" y="55" font-size="10" text-anchor="middle" fill="#fff">T3</text>
+    <line x1="235" y1="50" x2="250" y2="50" stroke="#8e44ad" stroke-width="2" marker-end="url(#arrowhead-purple)"/>
+    <circle cx="260" cy="50" r="15" fill="#c39bd3"/>
+    <text x="260" y="55" font-size="10" text-anchor="middle" fill="#fff">T4</text>
+  </g>
+  
+  <!-- Dream Sequence 4 -->
+  <g transform="translate(100, 760)">
+    <rect x="0" y="0" width="280" height="80" fill="#9b59b6" opacity="0.2" stroke="#9b59b6" stroke-width="2" rx="5"/>
+    <text x="140" y="20" font-size="14" font-weight="bold" text-anchor="middle" fill="#8e44ad">Dream Sequence 4</text>
+    <circle cx="40" cy="50" r="15" fill="#c39bd3"/>
+    <text x="40" y="55" font-size="10" text-anchor="middle" fill="#fff">T0</text>
+    <line x1="55" y1="50" x2="85" y2="50" stroke="#8e44ad" stroke-width="2" marker-end="url(#arrowhead-purple)"/>
+    <circle cx="100" cy="50" r="15" fill="#c39bd3"/>
+    <text x="100" y="55" font-size="10" text-anchor="middle" fill="#fff">T1</text>
+    <line x1="115" y1="50" x2="145" y2="50" stroke="#8e44ad" stroke-width="2" marker-end="url(#arrowhead-purple)"/>
+    <circle cx="160" cy="50" r="15" fill="#c39bd3"/>
+    <text x="160" y="55" font-size="10" text-anchor="middle" fill="#fff">T2</text>
+    <line x1="175" y1="50" x2="205" y2="50" stroke="#8e44ad" stroke-width="2" marker-end="url(#arrowhead-purple)"/>
+    <circle cx="220" cy="50" r="15" fill="#c39bd3"/>
+    <text x="220" y="55" font-size="10" text-anchor="middle" fill="#fff">T3</text>
+    <line x1="235" y1="50" x2="250" y2="50" stroke="#8e44ad" stroke-width="2" marker-end="url(#arrowhead-purple)"/>
+    <circle cx="260" cy="50" r="15" fill="#c39bd3"/>
+    <text x="260" y="55" font-size="10" text-anchor="middle" fill="#fff">T4</text>
+  </g>
+  
+  <!-- Causal edges between dreams (dashed lines) -->
+  <line x1="140" y1="510" x2="140" y2="540" stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="5,5" opacity="0.5"/>
+  <line x1="200" y1="510" x2="200" y2="540" stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="5,5" opacity="0.5"/>
+  <line x1="140" y1="620" x2="140" y2="650" stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="5,5" opacity="0.5"/>
+  <line x1="200" y1="620" x2="200" y2="650" stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="5,5" opacity="0.5"/>
+  <line x1="140" y1="730" x2="140" y2="760" stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="5,5" opacity="0.5"/>
+  <line x1="200" y1="730" x2="200" y2="760" stroke="#8e44ad" stroke-width="1.5" stroke-dasharray="5,5" opacity="0.5"/>
+  
+  <!-- Triplet explanation -->
+  <g transform="translate(420, 480)">
+    <rect x="0" y="0" width="180" height="100" fill="#fff" stroke="#8e44ad" stroke-width="2" rx="5"/>
+    <text x="90" y="20" font-size="13" font-weight="bold" text-anchor="middle" fill="#8e44ad">Each Node =</text>
+    <text x="90" y="40" font-size="11" text-anchor="middle" fill="#2c3e50">Image Triplet:</text>
+    <text x="90" y="60" font-size="11" text-anchor="middle" fill="#7f8c8d">what: scene state</text>
+    <text x="90" y="75" font-size="11" text-anchor="middle" fill="#7f8c8d">action: transformation</text>
+    <text x="90" y="90" font-size="11" text-anchor="middle" fill="#7f8c8d">result: new state</text>
+  </g>
+  
+  <!-- Graph Reasoning -->
+  <g transform="translate(700, 450)">
+    <rect x="0" y="0" width="600" height="350" fill="#1abc9c" opacity="0.15" stroke="#16a085" stroke-width="3" rx="10"/>
+    <text x="300" y="30" font-size="16" font-weight="bold" text-anchor="middle" fill="#16a085">Graph-Based Reasoning</text>
+    
+    <!-- Graph visualization -->
+    <text x="300" y="60" font-size="13" text-anchor="middle" fill="#7f8c8d">Nodes: All dream triplets</text>
+    <text x="300" y="80" font-size="13" text-anchor="middle" fill="#7f8c8d">Edges: Temporal (→) + Causal (⋯)</text>
+    
+    <!-- Multi-hop attention -->
+    <rect x="50" y="100" width="500" height="60" fill="#1abc9c" opacity="0.2" stroke="#16a085" stroke-width="2" rx="5"/>
+    <text x="300" y="125" font-size="13" font-weight="bold" text-anchor="middle" fill="#16a085">Multi-Hop Graph Attention</text>
+    <text x="300" y="145" font-size="11" text-anchor="middle" fill="#7f8c8d">Q, K, V projections + masked attention + 3 hops</text>
+    
+    <!-- Aggregation -->
+    <rect x="50" y="180" width="500" height="60" fill="#1abc9c" opacity="0.2" stroke="#16a085" stroke-width="2" rx="5"/>
+    <text x="300" y="205" font-size="13" font-weight="bold" text-anchor="middle" fill="#16a085">Reasoning Aggregation</text>
+    <text x="300" y="225" font-size="11" text-anchor="middle" fill="#7f8c8d">Pool all nodes → MLP → reasoning embedding (512-dim)</text>
+    
+    <!-- Output -->
+    <text x="300" y="270" font-size="12" font-weight="bold" text-anchor="middle" fill="#16a085">Output:</text>
+    <text x="300" y="290" font-size="11" text-anchor="middle" fill="#2c3e50">reasoning_embedding (B, 512)</text>
+    <text x="300" y="310" font-size="10" text-anchor="middle" fill="#7f8c8d">Unified representation of all reasoning paths</text>
+  </g>
+  
+  <!-- Arrow to output -->
+  <line x1="700" y1="840" x2="700" y2="890" stroke="#2c3e50" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="710" y="870" font-size="11" fill="#16a085">(B, 512-dim)</text>
+  
+  <!-- Output Decoder (detailed) -->
+  <rect x="500" y="900" width="400" height="220" fill="#e74c3c" opacity="0.15" stroke="#c0392b" stroke-width="3" rx="10"/>
+  <text x="700" y="925" font-size="16" font-weight="bold" text-anchor="middle" fill="#c0392b">Output Decoder</text>
+  <g>
+    <rect x="540" y="950" width="320" height="40" fill="#fff" stroke="#c0392b" stroke-width="1" rx="8"/>
+    <text x="700" y="970" font-size="12" text-anchor="middle" fill="#c0392b">MLP + LayerNorm + Activation</text>
+  </g>
+  <g>
+    <rect x="520" y="1000" width="160" height="70" fill="#3498db" opacity="0.2" stroke="#2980b9" stroke-width="2" rx="5"/>
+    <text x="600" y="1020" font-size="13" font-weight="bold" text-anchor="middle" fill="#2980b9">Text Decoding</text>
+    <text x="600" y="1040" font-size="11" text-anchor="middle" fill="#7f8c8d">→ Softmax over vocab</text>
+    <text x="600" y="1055" font-size="10" text-anchor="middle" fill="#2c3e50">"The result is..."</text>
+  </g>
+  <g>
+    <rect x="720" y="1000" width="160" height="70" fill="#f39c12" opacity="0.2" stroke="#e67e22" stroke-width="2" rx="5"/>
+    <text x="800" y="1020" font-size="13" font-weight="bold" text-anchor="middle" fill="#d35400">Image Decoding</text>
+    <text x="800" y="1040" font-size="11" text-anchor="middle" fill="#7f8c8d">→ Linear layers to triplet</text>
+    <text x="800" y="1055" font-size="10" text-anchor="middle" fill="#2c3e50">(what, action, result)</text>
+  </g>
+  
+  <!-- Final output -->
+  <rect x="500" y="1120" width="400" height="80" fill="#27ae60" opacity="0.2" stroke="#229954" stroke-width="2" rx="10"/>
+  <text x="700" y="1145" font-size="16" font-weight="bold" text-anchor="middle" fill="#229954">Final Output</text>
+  <text x="700" y="1170" font-size="13" text-anchor="middle" fill="#2c3e50">Text, Images, or Both</text>
+  <text x="700" y="1190" font-size="11" text-anchor="middle" fill="#7f8c8d">+ Optional dream visualization</text>
+  
+  <!-- Key innovations box (updated) -->
+  <g transform="translate(50, 1250)">
+    <rect x="0" y="0" width="470" height="360" fill="#ecf0f1" stroke="#95a5a6" stroke-width="2" rx="10"/>
+    <text x="235" y="30" font-size="16" font-weight="bold" text-anchor="middle" fill="#2c3e50">🔑 Key Innovations</text>
+    <text x="20" y="60" font-size="13" font-weight="bold" fill="#8e44ad">1. Universal Image Tokenization</text>
+    <text x="30" y="80" font-size="11" fill="#34495e">• All inputs (text/images) → image triplets</text>
+    <text x="30" y="95" font-size="11" fill="#34495e">• Unified representation for reasoning</text>
+    <text x="20" y="125" font-size="13" font-weight="bold" fill="#8e44ad">2. Dreaming in Image Space (MoE)</text>
+    <text x="30" y="145" font-size="11" fill="#34495e">• Mixture-of-Experts: spatial, temporal, causal, abstract</text>
+    <text x="30" y="160" font-size="11" fill="#34495e">• Gating network selects expert per step</text>
+    <text x="30" y="175" font-size="11" fill="#34495e">• Multiple parallel reasoning paths</text>
+    <text x="30" y="190" font-size="11" fill="#34495e">• Diverse exploration via learned offsets</text>
+    <text x="20" y="220" font-size="13" font-weight="bold" fill="#16a085">3. RL-Enhanced Dreaming</text>
+    <text x="30" y="240" font-size="11" fill="#34495e">• Policy network guides dream selection</text>
+    <text x="30" y="255" font-size="11" fill="#34495e">• Reward model for continuous learning</text>
+    <text x="20" y="285" font-size="13" font-weight="bold" fill="#16a085">4. Graph-Connected Reasoning</text>
+    <text x="30" y="305" font-size="11" fill="#34495e">• Temporal edges: within-dream flow</text>
+    <text x="30" y="320" font-size="11" fill="#34495e">• Causal edges: cross-dream connections</text>
+    <text x="30" y="335" font-size="11" fill="#34495e">• Multi-hop attention aggregates insights</text>
+    <text x="20" y="360" font-size="13" font-weight="bold" fill="#e67e22">5. Ollama Distillation</text>
+    <text x="30" y="380" font-size="11" fill="#34495e">• Knowledge transfer from LLM teachers</text>
+    <text x="30" y="395" font-size="11" fill="#34495e">• Improves reasoning and generalization</text>
+  </g>
+  
+  <!-- Example flow -->
+  <g transform="translate(550, 1250)">
+    <rect x="0" y="0" width="800" height="320" fill="#fff9e6" stroke="#f39c12" stroke-width="2" rx="10"/>
+    <text x="400" y="30" font-size="16" font-weight="bold" text-anchor="middle" fill="#d35400">📖 Example Flow</text>
+    
+    <text x="20" y="60" font-size="13" font-weight="bold" fill="#2980b9">Input:</text>
+    <text x="30" y="80" font-size="11" fill="#34495e">"What happens when you drop a ball?"</text>
+    
+    <text x="20" y="110" font-size="13" font-weight="bold" fill="#8e44ad">Tokenization:</text>
+    <text x="30" y="130" font-size="11" fill="#34495e">→ Image triplet: (ball in hand, releasing, ball falling)</text>
+    
+    <text x="20" y="160" font-size="13" font-weight="bold" fill="#8e44ad">Dreaming (4 sequences × 5 steps):</text>
+    <text x="30" y="180" font-size="11" fill="#34495e">Dream 1: ball → release → fall → bounce → settle</text>
+    <text x="30" y="195" font-size="11" fill="#34495e">Dream 2: ball → release → fall → roll → stop</text>
+    <text x="30" y="210" font-size="11" fill="#34495e">Dream 3: ball → release → fall → splash (water)</text>
+    <text x="30" y="225" font-size="11" fill="#34495e">Dream 4: ball → release → fall → break (glass)</text>
+    
+    <text x="20" y="255" font-size="13" font-weight="bold" fill="#16a085">Graph Reasoning:</text>
+    <text x="30" y="275" font-size="11" fill="#34495e">Connects dreams via causal links, weighs most likely paths</text>
+    
+    <text x="20" y="305" font-size="13" font-weight="bold" fill="#c0392b">Output (Text):</text>
+    <text x="30" y="325" font-size="11" fill="#34495e">"The ball will fall due to gravity, bounce on impact, and settle."</text>
+  </g>
+  
+  <!-- Arrow markers -->
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2c3e50"/>
+    </marker>
+    <marker id="arrowhead-purple" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#8e44ad"/>
+    </marker>
+  </defs>
+</svg>

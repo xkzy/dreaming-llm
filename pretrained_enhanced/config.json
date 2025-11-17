@@ -1,0 +1,43 @@
+{
+  "image_tokenizer": {
+    "embedding_dim": 512,
+    "patch_size": 16
+  },
+  "graph_rag": {
+    "top_k_neighbors": 8,
+    "max_hops": 3
+  },
+  "simulator": {
+    "branches": 4,
+    "max_depth": 5
+  },
+  "evaluator": {
+    "scoring": "confidence",
+    "penalty_alpha": 0.1
+  },
+  "runtime": {
+    "device": "cuda",
+    "enable_gpt51_codex_preview": true
+  },
+  "tokenizer": {
+    "vocab": null,
+    "pad_token": "<pad>",
+    "bos_token": "<s>",
+    "eos_token": "</s>",
+    "unk_token": "<unk>",
+    "extra_tokens": [
+      "<img>",
+      "<graph>",
+      "<ctx>"
+    ]
+  },
+  "text_decoder": {
+    "vocab_size": 4096,
+    "max_seq_len": 256,
+    "num_layers": 4,
+    "num_heads": 8,
+    "ff_dim": 2048,
+    "dropout": 0.1,
+    "top_k": 50
+  }
+}

@@ -15,7 +15,6 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import List, Tuple
 
 import torch
 import torch.nn as nn
@@ -28,7 +27,7 @@ from tqdm import tqdm
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from image_token_llm.vision_encoder import VisionEncoder, ImageTokenizerV2
+from image_token_llm.vision_encoder import ImageTokenizerV2
 from image_token_llm.config import ImageTokenizerConfig
 
 logging.basicConfig(
@@ -45,7 +44,7 @@ class COCOImageDataset(Dataset):
         self,
         image_dir: str,
         transform=None,
-        limit: int = None,
+        limit: int | None = None,
     ):
         self.image_dir = Path(image_dir)
         self.transform = transform
@@ -82,7 +81,7 @@ class ImageTokenizerTrainer:
     
     def __init__(
         self,
-        encoder: VisionEncoder,
+        encoder,
         device: str = "cuda",
         learning_rate: float = 1e-4,
     ):
@@ -127,8 +126,9 @@ class ImageTokenizerTrainer:
                 images = batch.to(self.device)
                 batch_size = images.shape[0]
 
-                # Always use full triplets: what, action, result are distinct images
-                # If batch_size is not divisible by 3, drop the remainder for this batch
+                # Always use full triplets: what, action, result
+                # are distinct images. If batch_size is not divisible
+                # by 3, drop the remainder for this batch
                 triplet_count = batch_size // 3
                 if triplet_count == 0:
                     # Not enough images for a triplet, skip this batch
@@ -141,7 +141,20 @@ class ImageTokenizerTrainer:
                 action = images_triplets[:, 1, :, :, :]
                 result = images_triplets[:, 2, :, :, :]
 
-                # Encode triplet(s) -> support different encoder interfaces
+                # Encode triplet(s) using the vision encoder.
+                # 
+                # Different encoder implementations in this project support
+                # different interfaces:
+                #   - Some encoders (e.g., legacy or custom CLIP/ResNet backbones)
+                #     use an `encode_triplet()` method or implement `__call__()`
+                #     to accept (what, action, result) images and return a tuple:
+                #         (fused_embedding, (what_emb, action_emb, result_emb))
+                #   - Other encoders (e.g., simple or lite backbones) return only
+                #     a single fused embedding tensor.
+                # 
+                # This code supports both interfaces for compatibility and to
+                # allow flexible swapping of encoder backbones. If the encoder
+                # returns a tuple, we use only the fused embedding for decoding.
                 out = self.encoder(what, action, result)
                 # Some encoders return (fused_embedding, components)
                 if isinstance(out, tuple):

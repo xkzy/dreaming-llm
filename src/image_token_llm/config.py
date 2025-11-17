@@ -94,6 +94,34 @@ class DreamingConfig(BaseModel):
     graph_reasoning_hops: int = Field(3, ge=1)
     output_mode: str = Field("text", pattern="^(text|image|both)$")
     enable_visualization: bool = True
+    
+    # MoE gating improvements
+    moe_top_k: int = Field(2, ge=1)
+    moe_noise_std: float = Field(0.1, ge=0.0)
+    load_balance_loss_weight: float = Field(0.01, ge=0.0)
+    
+    # Expert architecture
+    expert_num_layers: int = Field(2, ge=1)
+    expert_num_heads: int = Field(8, ge=1)
+    use_cross_expert_attention: bool = True
+    
+    # Input tokenization
+    use_contrastive_loss: bool = True
+    contrastive_temperature: float = Field(0.07, ge=0.01)
+    token_mask_prob: float = Field(0.1, ge=0.0, le=0.5)
+    embedding_dropout: float = Field(0.15, ge=0.0, le=0.5)
+    
+    # Graph reasoning
+    use_learned_edges: bool = True
+    num_edge_types: int = Field(4, ge=1)
+    use_node_memory: bool = True
+    graph_num_heads: int = Field(8, ge=1)
+    
+    # RL improvements
+    use_ppo: bool = True
+    ppo_clip_epsilon: float = Field(0.2, ge=0.0)
+    ppo_gae_lambda: float = Field(0.95, ge=0.0, le=1.0)
+    reward_components: bool = True
 
 
 class ExperimentConfig(BaseModel):
